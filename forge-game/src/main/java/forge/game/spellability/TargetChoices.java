@@ -55,7 +55,16 @@ public class TargetChoices extends ForwardingList<GameObject> implements Cloneab
     }
 
     public final boolean add(final GameObject o) {
-        if (o instanceof Player || o instanceof Card || o instanceof SpellAbility) {
+        // PhantomEntity (into-play): a card on the table the engine cannot see.
+        // canTarget() already accepts one, because every check there is either
+        // guarded by `instanceof Card` or is a virtual call the phantom
+        // overrides — so legality needed no change to Forge at all. Storing the
+        // choice does: without this the target is refused silently, add()
+        // returns false, the spell resolves having chosen nothing, and nothing
+        // anywhere says why. This is the only line of Forge's own code the
+        // phantom needs.
+        if (o instanceof Player || o instanceof Card || o instanceof SpellAbility
+                || o instanceof forge.game.PhantomEntity) {
             if (o instanceof Card c) {
                 cardControllers.put(c, c.getController());
             }
