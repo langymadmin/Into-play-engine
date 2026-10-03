@@ -1,6 +1,6 @@
 # Start the Into Play engine bridge on Windows.
 #
-#   powershell -ExecutionPolicy Bypass -File into-play\windows\Start-Bridge.ps1
+#   powershell -ExecutionPolicy Bypass -File bridge\windows\Start-Bridge.ps1
 #
 # No Maven, no bash. You need two things in place first:
 #
@@ -35,7 +35,7 @@ Write-Host "  java    $ver" -ForegroundColor DarkGray
 
 # --- the jars ---------------------------------------------------------------
 if (-not (Test-Path $EngineDir)) {
-    Fail "No '$EngineDir' folder. Download the 'into-play-engine' artifact from the latest green Engine build run and unzip it here. See into-play\windows\LOCAL-WINDOWS.md."
+    Fail "No '$EngineDir' folder. Download the 'into-play-engine' artifact from the latest green Engine build run and unzip it here. See bridge\windows\LOCAL-WINDOWS.md."
 }
 $jars = @(Get-ChildItem -Path $EngineDir -Filter *.jar)
 if ($jars.Count -lt 10) {

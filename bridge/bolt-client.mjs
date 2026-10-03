@@ -11,7 +11,7 @@
 // One game, two turns, because a second Bolt needs a second untapped land and
 // lands come one per turn.
 //
-//   node into-play/bolt-client.mjs [ws://localhost:8099/play] [seconds]
+//   node bridge/bolt-client.mjs [ws://localhost:8099/play] [seconds]
 
 const url = process.argv[2] || "ws://localhost:8099/play";
 const budget = Number(process.argv[3] || 60) * 1000;

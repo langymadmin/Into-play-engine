@@ -31,7 +31,7 @@ the root of the clone:
 into-play-engine\
   engine\              <- the jars you just unzipped
   forge-gui\res\       <- the card scripts, from the clone
-  into-play\
+  bridge\
 ```
 
 A complete `engine\` folder has a few hundred jars and comes to about 54 MB. If
@@ -46,7 +46,7 @@ it has four, you grabbed the wrong thing.
 ## 3. Start the bridge
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File into-play\windows\Start-Bridge.ps1
+powershell -ExecutionPolicy Bypass -File bridge\windows\Start-Bridge.ps1
 ```
 
 It checks java, the jars and the card scripts before starting, and tells you
@@ -63,14 +63,14 @@ which one is missing rather than failing with a stack trace. When it is up:
 In a second terminal, from the same folder:
 
 ```powershell
-node into-play\bridge-client.mjs ws://localhost:8099/play 100
+node bridge\bridge-client.mjs ws://localhost:8099/play 100
 ```
 
 That plays a whole game by pressing OK at everything, and prints a traffic
 summary. Or the one that matters:
 
 ```powershell
-node into-play\bolt-client.mjs ws://localhost:8099/play 80
+node bridge\bolt-client.mjs ws://localhost:8099/play 80
 ```
 
 Lightning Bolt twice — once at something the engine cannot see, once at the
@@ -96,8 +96,8 @@ Git for Windows ships Git Bash, and WSL works too. Both run the existing
 scripts unchanged:
 
 ```bash
-./into-play/run-bridge.sh      # a whole game over the socket
-./into-play/run-bolt.sh        # the two Bolts
+./bridge/run-bridge.sh      # a whole game over the socket
+./bridge/run-bolt.sh        # the two Bolts
 ```
 
 They will try to build with Maven unless you pass `SKIP_BUILD=1` and already

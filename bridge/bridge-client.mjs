@@ -6,7 +6,7 @@
 // it is how you find out whether the wire actually carries a game, which is the
 // only question this is here to settle.
 //
-//   node into-play/bridge-client.mjs [ws://localhost:8099/play] [seconds]
+//   node bridge/bridge-client.mjs [ws://localhost:8099/play] [seconds]
 
 const url = process.argv[2] || "ws://localhost:8099/play";
 const budget = Number(process.argv[3] || 25) * 1000;

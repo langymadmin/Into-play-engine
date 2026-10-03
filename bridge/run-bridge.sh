@@ -6,12 +6,12 @@
 # the whole question is whether three threads — engine, socket, client — hand
 # control to each other correctly, and nothing short of a running game asks it.
 #
-#   ./into-play/run-bridge.sh            build if needed, then run
-#   SKIP_BUILD=1 ./into-play/run-bridge.sh
+#   ./bridge/run-bridge.sh            build if needed, then run
+#   SKIP_BUILD=1 ./bridge/run-bridge.sh
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-HERE="into-play"
+HERE="bridge"
 OUT="${OUT:-/tmp/into-play-spike}"
 PORT="${PORT:-8099}"
 # Longer than it used to need: the off-table seat no longer draws, so only

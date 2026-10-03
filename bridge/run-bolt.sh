@@ -6,11 +6,11 @@
 # unless the engine itself confirms each step. Where run-bridge.sh proves a game
 # can run, this proves the fork's reason to exist works through the whole stack.
 #
-#   ./into-play/run-bolt.sh
+#   ./bridge/run-bolt.sh
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-HERE="into-play"
+HERE="bridge"
 OUT="${OUT:-/tmp/into-play-spike}"
 PORT="${PORT:-8099}"
 # Two casts, and the second waits for a land to untap on a later turn.

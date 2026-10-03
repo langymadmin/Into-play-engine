@@ -7,7 +7,7 @@
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-HERE="into-play"
+HERE="bridge"
 
 FORGE_VERSION="${FORGE_VERSION:-2.0.16-SNAPSHOT}"
 OUT="${OUT:-/tmp/into-play-spike}"
@@ -52,8 +52,8 @@ echo "$CP" > "$OUT/CP.txt"
 echo "    $(tr ':' '\n' < "$OUT/CP.txt" | grep -c '\.jar') jars"
 
 echo "==> compiling spike"
-# Two source roots on purpose: the flat files at into-play/ are throwaway
-# experiments in the default package, while into-play/src holds the real
+# Two source roots on purpose: the flat files at bridge/ are throwaway
+# experiments in the default package, while bridge/src holds the real
 # forge.intoplay package that the app will actually talk to.
 javac -cp "$CP" -d "$OUT" "$HERE"/*.java
 javac -cp "$CP" -d "$OUT" "$HERE"/src/forge/intoplay/*.java

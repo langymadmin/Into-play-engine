@@ -87,7 +87,7 @@ jobs:
             sed 's/^/- `/; s/$/`/' /tmp/conflicts.txt
             echo
             echo "These are almost certainly our engine patches meeting upstream's own changes to the same code."
-            echo "Merge locally, reconcile by hand, and run \`./into-play/run-spike.sh Spike\` before pushing."
+            echo "Merge locally, reconcile by hand, and run \`./bridge/run-spike.sh Spike\` before pushing."
             echo
             echo "Sooner is cheaper than later: each week of drift makes the next merge harder."
           } > /tmp/body.md

@@ -24,7 +24,7 @@ Then put the work on a branch and keep `master` clean for merging upstream.
 
 ## What is here
 
-Everything under `into-play/` is additive. Only one file outside it is patched
+Everything under `bridge/` is additive. Only one file outside it is patched
 (`TargetChoices.add`, one clause), which is what keeps upstream merges cheap.
 
 The real code is the package; the flat files beside it are the throwaway spikes
@@ -46,11 +46,11 @@ re-check that the engine still starts.
 | `run-spike.sh` | Builds the engine modules and runs any of the above |
 
 ```sh
-./into-play/run-spike.sh Probe          # card pool
-./into-play/run-spike.sh Spike          # a game, prompt traffic on stdout
-./into-play/run-spike.sh PhantomSpike   # the phantom-target checks
-./into-play/run-bridge.sh               # a whole game over a WebSocket
-./into-play/run-bolt.sh                 # Bolt at a phantom, and Bolt at the opponent
+./bridge/run-spike.sh Probe          # card pool
+./bridge/run-spike.sh Spike          # a game, prompt traffic on stdout
+./bridge/run-spike.sh PhantomSpike   # the phantom-target checks
+./bridge/run-bridge.sh               # a whole game over a WebSocket
+./bridge/run-bolt.sh                 # Bolt at a phantom, and Bolt at the opponent
 ```
 
 Run from the root of the Forge checkout.
