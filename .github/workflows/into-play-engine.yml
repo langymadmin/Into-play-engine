@@ -83,6 +83,13 @@ jobs:
             exit 1
           }
 
+      # The fork's reason to exist. PhantomSpike exits non-zero on any failed
+      # check, so an upstream merge that quietly closes the hole — by tightening
+      # canTarget(), or by reworking the TargetChoices whitelist we patched —
+      # fails here instead of being discovered in a game.
+      - name: Can a spell still be aimed at something the engine cannot see?
+        run: timeout 300 java -cp "engine/*:engine" PhantomSpike forge-gui/res
+
       - uses: actions/upload-artifact@v4
         with:
           name: into-play-engine
