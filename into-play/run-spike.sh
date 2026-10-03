@@ -40,14 +40,28 @@ find ~/.m2/repository -name '*.jar' ! -name '*sources*' ! -name '*javadoc*' \
 
 CP="$OUT"
 for m in forge-core forge-game forge-ai forge-gui; do
-  CP="$CP:$m/target/$m-$FORGE_VERSION.jar"
+  # target/classes BEFORE the jar, and the order is load-bearing. The jar is
+  # only as fresh as the last `mvn package`, so editing a Forge source file and
+  # recompiling it with javac leaves the jar holding the old class — which then
+  # wins, and you debug a stack trace whose line numbers do not match the file
+  # in front of you. That cost an hour once; this line is the receipt.
+  CP="$CP:$m/target/classes:$m/target/$m-$FORGE_VERSION.jar"
 done
 CP="$CP:$(cat "$OUT/deps.txt")"
 echo "$CP" > "$OUT/CP.txt"
 echo "    $(tr ':' '\n' < "$OUT/CP.txt" | grep -c '\.jar') jars"
 
 echo "==> compiling spike"
+# Two source roots on purpose: the flat files at into-play/ are throwaway
+# experiments in the default package, while into-play/src holds the real
+# forge.intoplay package that the app will actually talk to.
 javac -cp "$CP" -d "$OUT" "$HERE"/*.java
+javac -cp "$CP" -d "$OUT" "$HERE"/src/forge/intoplay/*.java
+
+if [[ "${1:-}" == "--build-only" ]]; then
+  echo "==> built; classpath in $OUT/CP.txt"
+  exit 0
+fi
 
 echo "==> running"
 # forge-gui/res holds the 34k card scripts, editions and language files.

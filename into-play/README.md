@@ -22,23 +22,84 @@ a maintainable fork and an abandoned one.
 
 Then put the work on a branch and keep `master` clean for merging upstream.
 
-## What is here so far
+## What is here
 
-Two throwaway programs that answer "does this work at all". They are not the
-bridge; they are the evidence that the bridge is worth writing.
+Everything under `into-play/` is additive. Only one file outside it is patched
+(`TargetChoices.add`, one clause), which is what keeps upstream merges cheap.
+
+The real code is the package; the flat files beside it are the throwaway spikes
+that established it was worth writing, kept because they are the cheapest way to
+re-check that the engine still starts.
 
 | | |
 | --- | --- |
+| `src/forge/intoplay/BridgeGui.java` | `IGuiGame` marshalled to JSON — the engine's side of the wire |
+| `src/forge/intoplay/BridgeServer.java` | Netty WebSocket on `/play`, routing client messages to `IGameController` |
+| `src/forge/intoplay/BridgeMain.java` | Loads the card pool, starts a game behind the bridge |
+| `bridge-client.mjs` | A client that plays a game by pressing OK — the bridge's test |
+| `run-bridge.sh` | Starts the bridge, drives a game through it, fails if it stalls |
 | `Probe.java` | Loads the card pool with no GUI and reports size and cost |
-| `Spike.java` | Starts a real game with no GUI and logs every call the engine makes to the UI |
-| `run-spike.sh` | Builds the engine modules and runs either of them |
+| `Spike.java` | Starts a game with no GUI and logs every call the engine makes to the UI |
+| `PhantomSpike.java` | 12 checks that a spell can still be aimed off-table |
+| `run-spike.sh` | Builds the engine modules and runs any of the above |
 
 ```sh
-./run-spike.sh Probe     # card pool
-./run-spike.sh Spike     # a real game, prompt traffic on stdout
+./into-play/run-spike.sh Probe          # card pool
+./into-play/run-spike.sh Spike          # a game, prompt traffic on stdout
+./into-play/run-spike.sh PhantomSpike   # the phantom-target checks
+./into-play/run-bridge.sh               # a whole game over a WebSocket
 ```
 
 Run from the root of the Forge checkout.
+
+## The bridge
+
+A WebSocket on `ws://localhost:8099/play`. Every message is a JSON object with a
+`t` field; the full list is in the javadoc at the top of `BridgeServer.java`.
+
+**The protocol is asymmetric, and that is the one thing to understand.** Buttons
+are fire-and-forget — `{"t":"ok"}` with no id — because the engine is blocked on
+a latch and `IGameController` releases it. Questions carry an id —
+`{"t":"choose","id":7,"picked":[0]}` — because the engine thread is parked inside
+`getChoices()` waiting for that specific answer to come back. Taps carry neither,
+because the engine never asked: `{"t":"card","cardId":42}` tells it what the
+player touched, and it decides for itself whether that was legal.
+
+Three threads, and they must stay three: Forge throws outright if its input latch
+is awaited from the thread it considers the UI. The engine runs on
+`into-play-game`, Netty on its event loop, and a single-thread executor named
+`into-play-edt` stands in for the UI thread so `isGuiThread()` has a truthful
+answer.
+
+`BridgeGui` extends Forge's own `AbstractGuiGame`, which already derives `one()`,
+`oneOrNone()`, `reveal()` and `getInteger()` from `getChoices()`. So answering
+`getChoices` answers most of a 104-method interface, and only genuinely new
+behaviour is written — about fifteen methods, not a hundred.
+
+### What it does, measured
+
+`run-bridge.sh` plays a complete game: 108 turns, both libraries emptied, game
+over by decking. The client only presses OK and discards to hand size, so nobody
+ever plays a land — which is why the game ends that way, and why "a game ran to
+completion" is the assertion rather than anything about the result.
+
+The check earns its keep. Breaking the card lookup on purpose makes it fail with
+`no card selection ever reached the engine`. An earlier, weaker version of the
+assertion counted turn changes and passed anyway, because `turn` fires on every
+priority pass and cleared its own threshold long before the stall.
+
+### What the bridge does not do yet
+
+- **One socket, one seat.** The tablet and the phone will be two, with prompts
+  routed by which device owns the privacy of the information. The seat is already
+  on the wire (`{"t":"buttons","player":"…"}`) and a press may name it back, so
+  the routing exists; what is missing is a second connection to route to.
+- **Combat damage assignment** is stubbed: all damage to the first blocker. Wrong
+  and deliberately visible, so a game finishes rather than stopping there.
+- **Sideboarding** returns the deck unchanged.
+- **`{"t":"board"}` sends every seat's library, in order.** Fine for a test
+  client, not for two people at a table. Who may see what is the routing
+  question above.
 
 ## Measured
 
@@ -93,7 +154,15 @@ NPE:
    images, audio, dialogs, thread dispatch). Headless only needs the threading.
 2. `Lang.createInstance("en-US")`
 3. `Localizer.getInstance().initialize("en-US", res + "/languages/")`
-4. `CardStorageReader` → `StaticData`
+4. `ImageKeys.initializeDirs(...)` — looks like dead configuration for a headless
+   engine and is not. `CardDb` picks which printing you get partly by whether the
+   art is on disk, so looking up `"Mountain"` reaches `ImageKeys.hasImage()` and
+   NPEs on static fields nobody set. Empty paths are the truthful answer.
+5. `CardStorageReader` → `StaticData` — **not optional even for an empty deck.**
+   `GameAction.startGame` reaches for `StaticData.instance()` while dealing
+   opening hands. Skip it and the game gets all the way through the coin toss
+   first, then NPEs several frames from anything that mentions cards, which looks
+   exactly like a broken bridge and is not one.
 
 ### It needs a real second thread
 
@@ -121,25 +190,30 @@ assembles from `~/.m2` instead.
 the same `com.google.common.collect` package, and if it wins classpath order you
 get `NoSuchMethodError` on `ImmutableSet.of(...)` from somewhere unrelated.
 
-## What this fork will add
+## The two changes this fork exists for
 
-**Phantom targets** — a `GameEntity` subclass that is a legal target for
-anything, so a spell aimed at a card the engine cannot see still resolves.
-Legality funnels through one method, `SpellAbility.canTarget()`, where every
-card-specific check is guarded by `instanceof Card` and the rest are virtual
-calls on the `GameObject` interface. Effects landing on a phantom do not crash:
-`TargetChoices.getTargetCards()` is `filter(targets, Card.class)`, so the
-phantom is dropped and the effect no-ops. That filter is the interception point —
-one hook turns a dropped phantom into "this effect was aimed off-table".
+**Phantom targets — done.** `PhantomEntity` is a `GameEntity` that is a legal
+target for anything, so a spell aimed at a card the engine cannot see still
+resolves. Legality funnels through one method, `SpellAbility.canTarget()`, where
+every card-specific check is guarded by `instanceof Card` and the rest are
+virtual calls on the `GameObject` interface — so it needed no change to Forge at
+all. *Storing* the choice did: `TargetChoices.add()` whitelists
+`Player|Card|SpellAbility` and silently returned false, which let the spell
+resolve having chosen nothing. That one clause is the whole patch.
 
-**Self-declared effects** — non-prompting variants of `IDevModeCheats` so the
-player can enact what an unseen opponent did, going through the same engine APIs
-so triggers still fire.
+It also made three tests pass vacuously before it was found — "resolving does not
+throw" is trivially true when nothing is in targets. `PhantomSpike` now checks
+that the hole is the phantom's alone, not a hole in general.
 
-**The bridge** — `IGuiGame` + `IGameController` marshalled to JSON over a
-WebSocket. Forge already ships a remote implementation of this pair in
-`forge.gamemodes.net` (`ProtocolGuiGame`, `GameProtocolHandler`) over a binary
-wire; the seam is proven and only the encoding changes.
+A phantom answers every question with "yes" or "nothing", so effects that push
+outward work and effects that read back do not. "Gain life equal to its power"
+has no power to read. That is not a bug to fix — the information genuinely is not
+in the room — it is a prompt the UI has to ask.
+
+**Self-declared effects — not started.** Non-prompting variants of
+`IDevModeCheats` so the player can enact what an unseen opponent did, going
+through the same engine APIs so triggers still fire. `IGameController.cheat()` is
+already how the UI reaches dev mode, so the seam exists.
 
 The client design, and how these prompts map onto panels that already exist,
 is in `docs/UI-3.0.md` in the Into Play repo.

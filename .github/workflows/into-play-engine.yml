@@ -90,6 +90,38 @@ jobs:
       - name: Can a spell still be aimed at something the engine cannot see?
         run: timeout 300 java -cp "engine/*:engine" PhantomSpike forge-gui/res
 
+      # The bridge, driven by a WebSocket client that presses OK through every
+      # phase and taps a card whenever the engine wants one. It has to play a
+      # game to the end, which is a stronger claim than it sounds: three threads
+      # — engine, socket, client — hand control to each other hundreds of times,
+      # and a deadlock anywhere stops the game quietly rather than failing.
+      - name: Can a whole game be played over the socket?
+        run: |
+          javac -cp "engine/*" -d engine into-play/src/forge/intoplay/*.java
+          java -Xmx2g -cp "engine/*:engine" forge.intoplay.BridgeMain forge-gui/res 8099 \
+            > bridge-server.log 2>&1 &
+          SERVER=$!
+          # Loading 34k card scripts takes a few seconds, so wait for the socket
+          # rather than guessing at a sleep. Without the card database the engine
+          # gets as far as the coin toss and then NPEs while dealing opening
+          # hands, which looks like a broken bridge and is not one.
+          for _ in $(seq 1 90); do
+            grep -q "bridge listening" bridge-server.log && break
+            sleep 1
+          done
+          grep -q "bridge listening" bridge-server.log || {
+            echo "::error::the bridge never came up"
+            grep -v "not assigned to any set" bridge-server.log | tail -20
+            exit 1
+          }
+          node into-play/bridge-client.mjs ws://localhost:8099/play 60 || {
+            echo "::error::a game could not be played over the bridge"
+            grep -v "not assigned to any set" bridge-server.log | tail -30
+            kill $SERVER 2>/dev/null || true
+            exit 1
+          }
+          kill $SERVER 2>/dev/null || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: into-play-engine
