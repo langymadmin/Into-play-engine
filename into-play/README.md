@@ -37,9 +37,9 @@ re-check that the engine still starts.
 | `src/forge/intoplay/BridgeServer.java` | Netty WebSocket on `/play`, routing client messages to `IGameController` |
 | `src/forge/intoplay/BridgeMain.java` | Loads the card pool, starts a game behind the bridge |
 | `bridge-client.mjs` | A client that plays a game by pressing OK — the bridge's test |
-| `bolt-client.mjs` | Casts Lightning Bolt at something off the table — the fork's test |
+| `bolt-client.mjs` | Casts Bolt twice: at a phantom, then at the real opponent |
 | `run-bridge.sh` | Starts the bridge, drives a game through it, fails if it stalls |
-| `run-bolt.sh` | Starts the bridge and casts the Bolt, fails unless all five steps confirm |
+| `run-bolt.sh` | Starts the bridge and casts both Bolts, fails unless the engine confirms all seven steps |
 | `Probe.java` | Loads the card pool with no GUI and reports size and cost |
 | `Spike.java` | Starts a game with no GUI and logs every call the engine makes to the UI |
 | `PhantomSpike.java` | 12 checks that a spell can still be aimed off-table |
@@ -50,7 +50,7 @@ re-check that the engine still starts.
 ./into-play/run-spike.sh Spike          # a game, prompt traffic on stdout
 ./into-play/run-spike.sh PhantomSpike   # the phantom-target checks
 ./into-play/run-bridge.sh               # a whole game over a WebSocket
-./into-play/run-bolt.sh                 # Bolt at a card the engine cannot see
+./into-play/run-bolt.sh                 # Bolt at a phantom, and Bolt at the opponent
 ```
 
 Run from the root of the Forge checkout.
@@ -127,6 +127,44 @@ state lives inside that object — its own target set, its min/max accounting,
 whether OK is enabled — so adding a target through `sa.getTargets()` instead
 would leave the input believing nothing had been chosen.
 
+### One seat is a proxy, and it is still a real Player
+
+The opponent is a genuine engine `Player` — that is the point, and it is what
+makes their life total real rather than a number a human nudges. Only their
+*cards* are cardboard. So the same Bolt proves both halves:
+
+```
+  >>> TELL THEM: Lightning Bolt → their 2/2 on the table     (phantom: engine does nothing)
+  life    Phantom 20 -> 17  (engine applied 3)               (player: engine does it itself)
+```
+
+Two things had to be true for that to work, and both are Forge's own machinery:
+
+**It must not draw.** Its sixty cards are on the table, not in the engine, and a
+real player who draws from an empty library loses — rule 704.5b. The proxy would
+hand over the game within a few turns for no reason visible at the table. The
+fix is a `CantDraw` static on a card in its command zone, which stops the draw
+*before* `drawCards` touches the library, so `triedToDrawFromEmptyLibrary` is
+never set. Blocking the loss instead would leave a failed draw happening every
+turn, firing whatever watches for one.
+
+`EffectZone$ Command` is load-bearing. A static ability is only active on the
+battlefield unless it says otherwise, so without it the card sits in the command
+zone with its ability parsed, attached, and doing nothing — `canDraw()` stayed
+true and the proxy decked itself out exactly as before. `BridgeMain` now prints
+the seal on startup (`canDraw=false`) rather than assuming it took.
+
+**It must not be asked anything.** Nobody is holding that screen.
+`autoPassUntilEndOfTurn()` is Forge's own yield, re-armed on every
+`GameEventTurnBegan` because `autoPassCancel` clears it at each cleanup. Only
+that seat: our own priority during their turn still comes through, because that
+is where instants live.
+
+The bridge also now tells the client which seat is the proxy, in `open` and
+`board`. With one socket holding both seats, "which seat am I" is genuinely
+ambiguous — inferring it from whoever was prompted first made the Bolt test
+depend on the coin toss.
+
 ### Two messages, because a spell can be countered
 
 `{"t":"offTable","phase":"aimed",...}` when the arrow is drawn, and
@@ -167,10 +205,22 @@ the table.
   the routing exists; what is missing is a second connection to route to.
 - **Combat damage assignment** is stubbed: all damage to the first blocker. Wrong
   and deliberately visible, so a game finishes rather than stopping there.
+- **The proxy's opening seven is fictional.** The opening hand is dealt before
+  the game starts, which skips the draw check, so the engine thinks it holds
+  seven cards. Harmless, and the count starts out roughly honest — but it never
+  changes after that.
+- **Its mulligan is auto-kept.** At a real table that decision happens in the
+  room; the engine still has to be answered, and keeping is the answer.
 - **Sideboarding** returns the deck unchanged.
 - **`{"t":"board"}` sends every seat's library, in order.** Fine for a test
   client, not for two people at a table. Who may see what is the routing
   question above.
+- **The board projection is thinner than `CardView`.** It carries id, name and
+  tapped. Everything else a client needs — power, toughness, counters,
+  attacking, summoning sickness — already exists on `CardView` and simply is not
+  serialised yet. Worth doing in one pass rather than a field at a time: the
+  `tapped` flag only got added because a test tripped over its absence, and the
+  client had grown logic to work around a gap that was never Forge's.
 
 ## Measured
 

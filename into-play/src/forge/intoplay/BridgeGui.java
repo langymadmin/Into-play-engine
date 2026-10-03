@@ -11,6 +11,7 @@ import forge.game.GameState;
 import forge.game.card.CardView;
 import forge.game.event.GameEvent;
 import forge.game.event.GameEventSpellResolved;
+import forge.game.event.GameEventTurnBegan;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -84,6 +85,20 @@ public class BridgeGui extends AbstractGuiGame {
 
     private PlayerView currentPlayer;
     private volatile String focus;
+
+    /**
+     * The seat whose cards are on the table rather than in the engine.
+     *
+     * <p>A real {@code Player} — that is the point, and it is what makes the
+     * life counter real — but one whose decisions happen in the room. The
+     * engine must never stop and ask it anything, because nobody is holding
+     * that screen.
+     */
+    private volatile String offTableSeat;
+
+    public void setOffTableSeat(final String name) {
+        offTableSeat = name;
+    }
 
     /**
      * Who the last pair of buttons belonged to.
@@ -227,6 +242,10 @@ public class BridgeGui extends AbstractGuiGame {
                     JsonObject j = new JsonObject();
                     j.addProperty("id", c.getId());
                     j.addProperty("name", c.getName());
+                    // Tapped matters to a client that has to pay for something:
+                    // a second Bolt needs a second untapped land, and "find a
+                    // Mountain" would keep picking the one already spent.
+                    j.addProperty("tapped", c.isTapped());
                     arr.add(j);
                 }
                 if (arr.size() > 0) {
@@ -236,6 +255,7 @@ public class BridgeGui extends AbstractGuiGame {
             seats.add(s);
         }
         o.add("seats", seats);
+        o.addProperty("offTable", offTableSeat);
         PlayerView turn = getGameView().getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
         o.addProperty("turn", getGameView().getTurn());
@@ -869,6 +889,11 @@ public class BridgeGui extends AbstractGuiGame {
             }
         }
         o.add("seats", seats);
+        // Which seat is a proxy for someone across the table. The client cannot
+        // work this out for itself: with one socket holding both seats, "which
+        // seat am I" is genuinely ambiguous, and inferring it from whoever was
+        // prompted first means it changes with the coin toss.
+        o.addProperty("offTable", offTableSeat);
         send(o);
     }
 
@@ -892,6 +917,24 @@ public class BridgeGui extends AbstractGuiGame {
         // phantom is neither a Card nor a Player and every effect tests for
         // exactly those two. Nothing is corrupted; nothing is reported either.
         // This is the report.
+        // Re-arm the off-table seat's auto-pass every turn.
+        //
+        // Forge's own mechanism, not one invented here: autoPassUntilEndOfTurn
+        // sets a yield the priority loop consults, and it is deliberately
+        // per-turn — autoPassCancel runs at every cleanup — so this has to be
+        // re-armed rather than set once.
+        //
+        // Only THAT seat. Our own priority during their turn still comes
+        // through, because that is where instants live: a bridge that passed
+        // for both seats would quietly remove the ability to respond.
+        if (event instanceof GameEventTurnBegan && offTableSeat != null) {
+            // The cast is necessary: autoPassCancel is on IGameController but
+            // autoPassUntilEndOfTurn is not — only the human controller has it.
+            if (controllerFor(offTableSeat) instanceof forge.player.PlayerControllerHuman h) {
+                h.autoPassUntilEndOfTurn();
+            }
+        }
+
         if (event instanceof GameEventSpellResolved r) {
             String[] aimed = pendingOffTable.remove(r.stackDescription());
             if (aimed != null) {

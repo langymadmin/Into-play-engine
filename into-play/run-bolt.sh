@@ -13,7 +13,8 @@ cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 HERE="into-play"
 OUT="${OUT:-/tmp/into-play-spike}"
 PORT="${PORT:-8099}"
-SECONDS_BUDGET="${SECONDS_BUDGET:-40}"
+# Two casts, and the second waits for a land to untap on a later turn.
+SECONDS_BUDGET="${SECONDS_BUDGET:-70}"
 NODE="${NODE:-node}"
 
 if [[ "${SKIP_BUILD:-}" != "1" || ! -f "$OUT/CP.txt" ]]; then

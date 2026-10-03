@@ -9,6 +9,10 @@ import forge.game.Game;
 import forge.game.GameRules;
 import forge.game.GameType;
 import forge.game.Match;
+import forge.card.CardRarity;
+import forge.card.CardRules;
+import forge.game.card.Card;
+import forge.game.card.CardFactory;
 import forge.game.player.Player;
 import forge.game.player.RegisteredPlayer;
 import forge.game.zone.ZoneType;
@@ -230,6 +234,57 @@ public final class BridgeMain {
         return d;
     }
 
+    /** The seat that sits across the table. Its cards are cardboard. */
+    static final String OFF_TABLE = "Phantom";
+
+    /**
+     * Stop the off-table seat from drawing, so it cannot deck itself out.
+     *
+     * <p>The problem is real and was watched happening: that seat is a genuine
+     * engine {@link Player}, which is what makes its life total real, but its
+     * sixty cards are on the table and not in the engine's library. A real
+     * player who draws from an empty library loses — rule 704.5b — so the proxy
+     * would hand us the game within a few turns for no reason anyone at the
+     * table could see.
+     *
+     * <p>Preventing the <i>draw</i> rather than the <i>loss</i>, and the order
+     * matters: {@code drawCards} checks {@code canDraw()} before touching the
+     * library, so no draw is ever attempted and
+     * {@code triedToDrawFromEmptyLibrary} is never set. Blocking the loss
+     * instead would leave a failed draw happening every turn, firing whatever
+     * watches for one.
+     *
+     * <p>Done with Forge's own machinery — a static ability on a card in the
+     * command zone, which is one of {@code STATIC_ABILITIES_SOURCE_ZONES} — so
+     * there is no patch here and no special case inside the engine. Their
+     * opening seven still arrives, because the opening hand is dealt before the
+     * game starts and skips the check; that is fine, and it means the hand
+     * count starts out roughly honest.
+     */
+    static void sealOffTableLibrary(final Game game, final Player seat) {
+        List<String> script = List.of(
+                "Name:Off-Table Seat",
+                "Types:Effect",
+                // EffectZone$ Command is load-bearing: a static ability is only
+                // active in the battlefield unless it says otherwise, so without
+                // it the card sits in the command zone with its ability parsed,
+                // attached, and doing nothing at all. canDraw() stayed true and
+                // the proxy decked itself out exactly as before.
+                "S:Mode$ CantDraw | ValidPlayer$ You | EffectZone$ Command "
+                        + "| Description$ This seat's cards are on the table, not in the engine.",
+                "Oracle:");
+        PaperCard pc = new PaperCard(CardRules.fromScript(script), "", CardRarity.Common);
+        Card proxy = CardFactory.getCard(pc, seat, game);
+        game.getAction().moveTo(ZoneType.Command, proxy, null, null);
+        // Assert it, rather than assuming the script took. A seal that silently
+        // does nothing is worse than no seal: the proxy decks itself out and
+        // hands over the game for a reason nobody at the table can see.
+        System.out.println("seal: " + seat.getName()
+                + " proxy in " + proxy.getZone()
+                + " statics=" + proxy.getStaticAbilities().size()
+                + " canDraw=" + seat.canDraw());
+    }
+
     static void runGame(final String res, final BridgeGui gui) {
         current = gui;
 
@@ -266,7 +321,16 @@ public final class BridgeMain {
             game.subscribeToEvents(new forge.gui.control.GameEventForwarder(gui));
             mine.add(p.getView());
         }
+        // Before openView, so the first message the client sees already names
+        // the proxy seat.
+        gui.setOffTableSeat(OFF_TABLE);
         gui.openView(mine);
+
+        for (Player p : game.getPlayers()) {
+            if (OFF_TABLE.equals(p.getName())) {
+                sealOffTableLibrary(game, p);
+            }
+        }
 
         System.out.println("=== starting game ===");
         match.startGame(game);

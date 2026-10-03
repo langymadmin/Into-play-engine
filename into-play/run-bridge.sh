@@ -14,7 +14,9 @@ cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 HERE="into-play"
 OUT="${OUT:-/tmp/into-play-spike}"
 PORT="${PORT:-8099}"
-SECONDS_BUDGET="${SECONDS_BUDGET:-45}"
+# Longer than it used to need: the off-table seat no longer draws, so only
+# one player decks out and the game takes about twice as many turns to end.
+SECONDS_BUDGET="${SECONDS_BUDGET:-100}"
 NODE="${NODE:-node}"
 
 if [[ "${SKIP_BUILD:-}" != "1" || ! -f "$OUT/CP.txt" ]]; then

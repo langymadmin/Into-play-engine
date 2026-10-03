@@ -114,7 +114,7 @@ jobs:
             grep -v "not assigned to any set" bridge-server.log | tail -20
             exit 1
           }
-          node into-play/bridge-client.mjs ws://localhost:8099/play 60 || {
+          node into-play/bridge-client.mjs ws://localhost:8099/play 110 || {
             echo "::error::a game could not be played over the bridge"
             grep -v "not assigned to any set" bridge-server.log | tail -30
             kill $SERVER 2>/dev/null || true
@@ -127,7 +127,7 @@ jobs:
       # from the game above because it asserts something different — not that a
       # game runs, but that a spell with no legal target in the engine's state
       # can still be cast, paid for, resolved, and reported to the room.
-      - name: Can Bolt be aimed at something that is not in the game?
+      - name: Bolt at a phantom, and Bolt at the real opponent
         run: |
           java -Xmx2g -cp "engine/*:engine" forge.intoplay.BridgeMain forge-gui/res 8100 \
             > bolt-server.log 2>&1 &
@@ -141,7 +141,7 @@ jobs:
             grep -v "not assigned to any set" bolt-server.log | tail -20
             exit 1
           }
-          node into-play/bolt-client.mjs ws://localhost:8100/play 45 || {
+          node into-play/bolt-client.mjs ws://localhost:8100/play 80 || {
             echo "::error::Bolt could not be aimed off the table"
             grep -v "not assigned to any set" bolt-server.log | tail -30
             kill $SERVER 2>/dev/null || true
