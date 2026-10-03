@@ -43,6 +43,7 @@ import java.util.function.Consumer;
  *   {"t":"order",   "id":11, "options":[…], "destFrom":n}
  *   {"t":"manipulate","id":12, "options":[…], "movable":[…]}
  *   {"t":"turn",    "player":"…"}
+ *   {"t":"phase",   "step":"MAIN1", "group":1, "turnPlayer":"…", "stopsHere":true}
  *   {"t":"board",   "seats":[{"name":…,"life":…,"hand":[…],"battlefield":[…]}]}
  *   {"t":"cards"} {"t":"reveal"} {"t":"highlight"} {"t":"focus"}
  *   {"t":"combat"} {"t":"gameOver"} {"t":"alert"} {"t":"rejected"}
@@ -57,6 +58,7 @@ import java.util.function.Consumer;
  *   {"t":"card","cardId":42}        tap a card: discard it, play it, cast it
  *   {"t":"seat","name":"…"}         tap a player
  *   {"t":"board"}                   send the table again
+ *   {"t":"stops","steps":["UPKEEP","MAIN1"]}  wake me only at these steps
  *   {"t":"concede"}
  * </pre>
  *
@@ -225,6 +227,19 @@ public final class BridgeServer {
                 case "board":
                     g.sendBoard();
                     break;
+                // The phase dial, as a message. Each named step is one the
+                // player wants to be woken at; an empty list means all of them.
+                case "stops": {
+                    java.util.List<String> names = new java.util.ArrayList<>();
+                    if (in.has("steps")) {
+                        for (com.google.gson.JsonElement e : in.getAsJsonArray("steps")) {
+                            names.add(e.getAsString());
+                        }
+                    }
+                    g.setStops(names);
+                    System.out.println("stops: " + names);
+                    break;
+                }
                 // Aim the spell at something the engine cannot see. The whole
                 // fork is for this message.
                 //

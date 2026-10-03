@@ -270,6 +270,24 @@ public final class BridgeMain {
                 // it the card sits in the command zone with its ability parsed,
                 // attached, and doing nothing at all. canDraw() stayed true and
                 // the proxy decked itself out exactly as before.
+                // The seat never takes a turn. Their turn happens in the room,
+                // with their own cards, their own untaps and their own draws —
+                // none of which the engine can see. Having it run a full turn
+                // for that seat is theatre: it untaps nothing, draws nothing,
+                // plays nothing, and doubles how long a game takes.
+                //
+                // Forge's own mechanism. PhaseHandler.getNextActivePlayer runs
+                // a BeginTurn replacement and, if anything replaced it, calls
+                // itself again with the next player — so a skip here is the
+                // engine's normal path, not a hole punched through it.
+                //
+                // ActiveZones$ Command for the same reason the static needs
+                // EffectZone: a command-zone card is inert otherwise.
+                "R:Event$ BeginTurn | ActiveZones$ Command | ValidPlayer$ You | Skip$ True "
+                        + "| Description$ This seat's turns happen at the table, not in the engine.",
+                // Still worth keeping even though no draw step ever arrives for
+                // this seat: a spell can tell it to draw, and its library is
+                // not real either.
                 "S:Mode$ CantDraw | ValidPlayer$ You | EffectZone$ Command "
                         + "| Description$ This seat's cards are on the table, not in the engine.",
                 "Oracle:");
@@ -282,6 +300,7 @@ public final class BridgeMain {
         System.out.println("seal: " + seat.getName()
                 + " proxy in " + proxy.getZone()
                 + " statics=" + proxy.getStaticAbilities().size()
+                + " replacements=" + proxy.getReplacementEffects().size()
                 + " canDraw=" + seat.canDraw());
     }
 

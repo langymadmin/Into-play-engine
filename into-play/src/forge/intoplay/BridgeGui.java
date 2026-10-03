@@ -12,6 +12,7 @@ import forge.game.card.CardView;
 import forge.game.event.GameEvent;
 import forge.game.event.GameEventSpellResolved;
 import forge.game.event.GameEventTurnBegan;
+import forge.game.event.GameEventTurnPhase;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -301,6 +302,14 @@ public class BridgeGui extends AbstractGuiGame {
             o.addProperty("cardId", card.getId());
         }
         send(o);
+
+        // Now that the engine is parked, it is safe to say what it is waiting
+        // to be pointed at.
+        JsonObject targeting = pendingTargeting;
+        if (targeting != null) {
+            pendingTargeting = null;
+            send(targeting);
+        }
     }
 
     @Override
@@ -383,6 +392,16 @@ public class BridgeGui extends AbstractGuiGame {
     public void setSelectables(final Iterable<CardView> cards, final int min, final int max) {
         super.setSelectables(cards, min, max);
         JsonObject o = msg("targeting");
+        // Held, not sent. Forge calls this from the InputSelectTargets
+        // CONSTRUCTOR, which runs before showAndWait() puts the input on the
+        // queue — so a client fast enough to answer the announcement finds
+        // nothing listening and the declaration is dropped. It only showed up
+        // once the opponent stopped taking turns and the reply got quicker,
+        // which is the worst kind of race: latent, and timing-dependent.
+        //
+        // showPromptMessage is the honest moment. setInput() pushes the input
+        // and then calls showMessage(), so by the time a prompt goes out the
+        // engine really is parked and ready to be answered.
         o.addProperty("min", min);
         o.addProperty("max", max);
         o.addProperty("offTable", true);
@@ -396,14 +415,18 @@ public class BridgeGui extends AbstractGuiGame {
             }
         }
         o.add("cards", arr);
-        send(o);
+        pendingTargeting = o;
     }
 
     @Override
     public void clearSelectables() {
         super.clearSelectables();
+        pendingTargeting = null;
         send(msg("targetingDone"));
     }
+
+    /** A targeting announcement waiting for the input to actually be live. */
+    private volatile JsonObject pendingTargeting;
 
     /**
      * Something has been aimed off the table — but has not happened yet.
@@ -457,19 +480,77 @@ public class BridgeGui extends AbstractGuiGame {
     }
 
     /**
-     * False always: stop at every phase.
+     * Which steps the player wants the game to stop at.
      *
-     * <p>Forge's desktop UI answers this from the phase indicator's enabled
-     * labels — the player's own "don't stop in my upkeep" preferences. There is
-     * no such widget here, and the wrong answer is not symmetrical: skipping a
-     * phase the player wanted silently removes their window to act, while
-     * stopping at one they did not want costs a tap. Into Play's phase dial
-     * already decides what the player is shown, so this stays open and the
-     * client filters.
+     * <p>This is the phase dial, and it is the only thing it can be under 3.0.
+     * In 2.0 the dial <i>drove</i> the phase — tap a step and the app moved
+     * there. The engine owns the phase now, so the dial stops being a control
+     * and becomes a filter: thirteen steps, and for each one, "wake me here or
+     * don't". Forge's desktop UI answers this exact method by reading which
+     * labels are lit in its phase indicator, which is also what endstep.cc's
+     * lit-versus-dim phase buttons are.
+     *
+     * <p>Empty means stop everywhere, which is the safe default: skipping a
+     * step the player wanted silently removes their window to act, while
+     * stopping at one they did not want costs a tap.
      */
     @Override
     public boolean isUiSetToSkipPhase(final PlayerView playerTurn, final PhaseType phase) {
-        return false;
+        return !stops.isEmpty() && !stops.contains(phase);
+    }
+
+    /** The steps the client has asked to be woken at; empty means all of them. */
+    private final java.util.Set<PhaseType> stops =
+            java.util.EnumSet.noneOf(PhaseType.class);
+
+    /** Replace the stop list. Names are {@link PhaseType} constants. */
+    public void setStops(final Iterable<String> names) {
+        stops.clear();
+        if (names == null) {
+            return;
+        }
+        for (String n : names) {
+            try {
+                stops.add(PhaseType.valueOf(n));
+            } catch (IllegalArgumentException e) {
+                System.out.println("unknown phase in stop list: " + n);
+            }
+        }
+    }
+
+    /**
+     * Where the engine is, as data rather than prose.
+     *
+     * <p>The client was reading "Phase: Main phase, precombat" out of a
+     * human-readable prompt with a regular expression, which is fine for a test
+     * harness and no basis for a dial. The step name is the enum constant, and
+     * {@code group} is Forge's own {@code PHASE_GROUPS} index — the six
+     * clusters (untap/upkeep/draw, main 1, the six combat steps, main 2, end,
+     * cleanup) that every Magic client draws as separated bands. The grouping
+     * is not invented here either.
+     */
+    private void sendPhase(final GameEventTurnPhase e) {
+        JsonObject o = msg("phase");
+        o.addProperty("step", e.phase() == null ? null : e.phase().name());
+        o.addProperty("label", e.phase() == null ? null : e.phase().nameForScripts);
+        o.addProperty("group", group(e.phase()));
+        o.addProperty("turnPlayer", e.playerTurn() == null ? null : e.playerTurn().getName());
+        o.addProperty("desc", e.phaseDesc());
+        o.addProperty("stopsHere", e.phase() != null
+                && !isUiSetToSkipPhase(e.playerTurn(), e.phase()));
+        send(o);
+    }
+
+    private static int group(final PhaseType p) {
+        if (p == null) {
+            return -1;
+        }
+        for (int i = 0; i < PhaseType.PHASE_GROUPS.size(); i++) {
+            if (PhaseType.PHASE_GROUPS.get(i).contains(p)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     @Override
@@ -933,6 +1014,10 @@ public class BridgeGui extends AbstractGuiGame {
             if (controllerFor(offTableSeat) instanceof forge.player.PlayerControllerHuman h) {
                 h.autoPassUntilEndOfTurn();
             }
+        }
+
+        if (event instanceof GameEventTurnPhase tp) {
+            sendPhase(tp);
         }
 
         if (event instanceof GameEventSpellResolved r) {
