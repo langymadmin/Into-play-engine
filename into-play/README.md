@@ -37,7 +37,9 @@ re-check that the engine still starts.
 | `src/forge/intoplay/BridgeServer.java` | Netty WebSocket on `/play`, routing client messages to `IGameController` |
 | `src/forge/intoplay/BridgeMain.java` | Loads the card pool, starts a game behind the bridge |
 | `bridge-client.mjs` | A client that plays a game by pressing OK — the bridge's test |
+| `bolt-client.mjs` | Casts Lightning Bolt at something off the table — the fork's test |
 | `run-bridge.sh` | Starts the bridge, drives a game through it, fails if it stalls |
+| `run-bolt.sh` | Starts the bridge and casts the Bolt, fails unless all five steps confirm |
 | `Probe.java` | Loads the card pool with no GUI and reports size and cost |
 | `Spike.java` | Starts a game with no GUI and logs every call the engine makes to the UI |
 | `PhantomSpike.java` | 12 checks that a spell can still be aimed off-table |
@@ -48,6 +50,7 @@ re-check that the engine still starts.
 ./into-play/run-spike.sh Spike          # a game, prompt traffic on stdout
 ./into-play/run-spike.sh PhantomSpike   # the phantom-target checks
 ./into-play/run-bridge.sh               # a whole game over a WebSocket
+./into-play/run-bolt.sh                 # Bolt at a card the engine cannot see
 ```
 
 Run from the root of the Forge checkout.
@@ -87,6 +90,74 @@ The check earns its keep. Breaking the card lookup on purpose makes it fail with
 `no card selection ever reached the engine`. An earlier, weaker version of the
 assertion counted turn changes and passed anyway, because `turn` fires on every
 priority pass and cleared its own threshold long before the stall.
+
+## The Bolt
+
+`run-bolt.sh` does the thing the fork was built for, through the whole stack:
+play a Mountain, cast Lightning Bolt, aim it at a card that is not in the game,
+pay for it, let it resolve, and read back what the room has to be told.
+
+```
+  play  Mountain (10)
+  cast  Lightning Bolt (55)
+  target  engine wants 1-1 of 0 card(s), or something off the table
+          -> off the table: "their 2/2 on the table"
+  targets locked in
+  pay     tap Mountain (10)
+  RESOLVED
+  >>> TELL THEM: Lightning Bolt → their 2/2 on the table
+```
+
+**`1-1 of 0 card(s)` is the whole point.** The engine needed exactly one target
+and had none to offer: no creature anywhere in its state, so stock Forge would
+have refused the cast outright. The phantom is the only reason there is a legal
+spell here at all.
+
+### How a client declares one
+
+`{"t":"offTable","describe":"their 2/2 on the table"}`, while a `targeting`
+message is open. The engine's side is one method,
+`InputSelectTargets.selectOffTable(String)` — the second and last patch to
+Forge's own source, written in the style of the `selectCardForMacro` and
+`selectPlayerForMacro` methods already beside it, which exist for the same
+reason: something outside the UI driving a selection a human would click.
+
+Reaching into the live input is deliberate rather than lazy. Forge's targeting
+state lives inside that object — its own target set, its min/max accounting,
+whether OK is enabled — so adding a target through `sa.getTargets()` instead
+would leave the input believing nothing had been chosen.
+
+### Two messages, because a spell can be countered
+
+`{"t":"offTable","phase":"aimed",...}` when the arrow is drawn, and
+`{"t":"offTable","phase":"resolved","tellThem":true,...}` when the engine
+actually finishes with it. Telling the room "3 damage" the moment the arrow
+appears would be a lie often enough to matter. They are matched on Forge's own
+stack description, which both ends read from the same `sa.getStackDescription()`.
+
+### The Card-or-Player assumption is in three places, not one
+
+This is the fork's real shape, and it took a running game to see:
+
+| | What it does to a phantom |
+| --- | --- |
+| `TargetChoices.add()` | Refused it silently — **patched**, one clause |
+| `DamageDealEffect`'s apply loop | `instanceof Card` / `else instanceof Player`, so the phantom matches neither and the damage is skipped |
+| `DamageDealEffect`'s stack description | Narrows targets to Cards and Players, so Bolt reads `deals 3 damage to .` |
+
+Only the first is patched, and the other two are left alone on purpose: each
+lives in one of roughly two hundred effect classes, and chasing them would
+produce a fork nobody could merge upstream into.
+
+So `PhantomEntity`'s "absorbs whatever lands on it" is true only in the sense
+that nothing lands on it — `addDamageAfterPrevention` is never called. Nothing
+is corrupted; nothing happens either. The `offTable` message is the effect, as
+far as the room is concerned, and `line` carries the sentence while `effect`
+passes Forge's gapped version through unchanged. The number comes from the
+card's own text, which the client already has for every card it draws.
+
+The engine's job was to let the spell happen legally. The sentence belongs to
+the table.
 
 ### What the bridge does not do yet
 
@@ -154,11 +225,32 @@ NPE:
    images, audio, dialogs, thread dispatch). Headless only needs the threading.
 2. `Lang.createInstance("en-US")`
 3. `Localizer.getInstance().initialize("en-US", res + "/languages/")`
-4. `ImageKeys.initializeDirs(...)` — looks like dead configuration for a headless
-   engine and is not. `CardDb` picks which printing you get partly by whether the
+4. `ImageKeys.initializeDirs(...)` and `getAssetsDir()` — the assets dir must be
+   the **parent** of `res`, with a trailing separator, because
+   `ForgeConstants.RES_DIR` appends `res/` to it. Those constants are
+   `static final`, resolved the first time the class is touched, so
+   `GuiBase.setInterface` has to come before anything that loads cards.
+   `initializeDirs` looks like dead configuration for a headless engine and is
+   not. `CardDb` picks which printing you get partly by whether the
    art is on disk, so looking up `"Mountain"` reaches `ImageKeys.hasImage()` and
    NPEs on static fields nobody set. Empty paths are the truthful answer.
-5. `CardStorageReader` → `StaticData` — **not optional even for an empty deck.**
+5. `FModel.loadDynamicGamedata()` — **the most expensive thing to forget in the
+   whole bootstrap, because it fails silently and the symptom looks like
+   something else entirely.** It parses `res/lists/TypeLists.txt` into
+   `CardType.Constant.LAND_TYPES`, `CREATURE_TYPES` and the rest. Without it
+   those sets are empty, so *every subtype on every card is dropped at parse
+   time*: a Mountain comes out as `Basic Land` with no `Mountain` subtype.
+   Forge grants a basic land's `{T}: Add {R}` from that subtype
+   (`CardState.LandTraitChanges`), so the land produces no mana, Lightning Bolt
+   can never be paid for, and the engine waits forever inside
+   `applyManaToCost` — no exception, no log line, nothing in the prompt traffic
+   to suggest cards are the problem. Every creature type is gone too.
+
+   It also depends on 4 being right: `ForgeConstants.RES_DIR` is
+   `getAssetsDir() + "res/"`, and `FileUtil.readFile` returns an empty list for
+   a missing file rather than complaining, so a wrong assets dir produces
+   exactly the same silence.
+6. `CardStorageReader` → `StaticData` — **not optional even for an empty deck.**
    `GameAction.startGame` reaches for `StaticData.instance()` while dealing
    opening hands. Skip it and the game gets all the way through the coin toss
    first, then NPEs several frames from anything that mentions cards, which looks
@@ -192,7 +284,7 @@ get `NoSuchMethodError` on `ImmutableSet.of(...)` from somewhere unrelated.
 
 ## The two changes this fork exists for
 
-**Phantom targets — done.** `PhantomEntity` is a `GameEntity` that is a legal
+**Phantom targets — done, and proven in a real cast.** `PhantomEntity` is a `GameEntity` that is a legal
 target for anything, so a spell aimed at a card the engine cannot see still
 resolves. Legality funnels through one method, `SpellAbility.canTarget()`, where
 every card-specific check is guarded by `instanceof Card` and the rest are
@@ -209,6 +301,9 @@ A phantom answers every question with "yes" or "nothing", so effects that push
 outward work and effects that read back do not. "Gain life equal to its power"
 has no power to read. That is not a bug to fix — the information genuinely is not
 in the room — it is a prompt the UI has to ask.
+
+See **The Bolt** above for what actually happens when a spell resolves onto one,
+and for the two further places Forge assumes a target is a Card or a Player.
 
 **Self-declared effects — not started.** Non-prompting variants of
 `IDevModeCheats` so the player can enact what an unseen opponent did, going

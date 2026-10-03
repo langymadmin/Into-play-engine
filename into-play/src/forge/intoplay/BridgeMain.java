@@ -62,7 +62,17 @@ public final class BridgeMain {
      * headless engine has no opinion about most of it, so this answers the four
      * that matter and defaults the rest.
      */
-    static IGuiBase headlessGuiBase(final String assetsDir, final BridgeGui gui) {
+    /**
+     * The gui the platform seam hands out.
+     *
+     * <p>A field rather than a constructor argument because GuiBase has to be
+     * installed before anything touches ForgeConstants — whose paths are
+     * {@code static final} and resolved from getAssetsDir() at class-init — and
+     * that is long before a client connects and there is a gui to hand out.
+     */
+    static volatile BridgeGui current;
+
+    static IGuiBase headlessGuiBase(final String assetsDir) {
         InvocationHandler h = (proxy, method, args) -> {
             switch (method.getName()) {
                 case "invokeInEdtNow":
@@ -80,8 +90,13 @@ public final class BridgeMain {
                 case "isLibgdxPort":       return Boolean.FALSE;
                 case "hasNetGame":         return Boolean.FALSE;
                 case "getCurrentVersion":  return "into-play-bridge";
+                // The PARENT of res, with a trailing separator. ForgeConstants
+                // builds RES_DIR as getAssetsDir() + "res/", so returning the
+                // res directory itself yields ".../res/res/lists/TypeLists.txt",
+                // FileUtil.readFile returns an empty list for the missing file,
+                // and nothing complains. See loadCards for what that costs.
                 case "getAssetsDir":       return assetsDir;
-                case "getNewGuiGame":      return gui;
+                case "getNewGuiGame":      return current;
                 default: break;
             }
             if (method.isDefault()) {
@@ -119,6 +134,11 @@ public final class BridgeMain {
         final String res = args.length > 0 ? args[0] : "forge-gui/res";
         final int port = args.length > 1 ? Integer.parseInt(args[1]) : 8099;
 
+        // Order matters. GuiBase first: ForgeConstants' paths are static final
+        // and computed from getAssetsDir() the first time the class is touched,
+        // which card loading does.
+        java.nio.file.Path resPath = java.nio.file.Paths.get(res).toAbsolutePath().normalize();
+        GuiBase.setInterface(headlessGuiBase(resPath.getParent().toString() + java.io.File.separator));
         Lang.createInstance("en-US");
         Localizer.getInstance().initialize("en-US", res + "/languages/");
         loadCards(res);
@@ -171,6 +191,15 @@ public final class BridgeMain {
         java.nio.file.Path noCustom = java.nio.file.Files.createTempDirectory("into-play-nocustom");
         new StaticData(reader, null, res + "/editions", noCustom.toString(), res + "/blockdata",
                 "LatestCoreExp", true, false);
+        // TypeLists.txt, and this is the most expensive omission in the whole
+        // bootstrap because it fails silently and looks like something else.
+        // Without it CardType.Constant.LAND_TYPES and friends are empty, so
+        // every subtype on every card is dropped at parse time: a Mountain
+        // comes out as "Basic Land" with no "Mountain" subtype. Forge grants a
+        // basic land's "{T}: Add {R}" from that subtype, so the land produces
+        // no mana, Lightning Bolt can never be paid for, and the engine simply
+        // waits forever inside applyManaToCost with no error anywhere. Hours.
+        forge.model.FModel.loadDynamicGamedata();
         System.out.printf("cards loaded: %d in %d ms%n",
                 StaticData.instance().getCommonCards().getUniqueCards().size(),
                 System.currentTimeMillis() - t0);
@@ -188,17 +217,21 @@ public final class BridgeMain {
         Deck d = new Deck(name);
         PaperCard mountain = db.getCard("Mountain");
         PaperCard bolt = db.getCard("Lightning Bolt");
+        // Bolt-heavy, and not for flavour: an opening seven needs at least one
+        // of each for the Bolt sequence to have anything to do, and 36 lands to
+        // 24 spells gave an all-land hand often enough to fail the check for a
+        // reason that had nothing to do with the bridge.
         if (mountain != null) {
-            d.getMain().add(mountain, 36);
+            d.getMain().add(mountain, 24);
         }
         if (bolt != null) {
-            d.getMain().add(bolt, 24);
+            d.getMain().add(bolt, 36);
         }
         return d;
     }
 
     static void runGame(final String res, final BridgeGui gui) {
-        GuiBase.setInterface(headlessGuiBase(res, gui));
+        current = gui;
 
         List<RegisteredPlayer> registered = new ArrayList<>();
         registered.add(new RegisteredPlayer(redDeck("Into Play")).setPlayer(lobbyPlayer("Into Play")));

@@ -135,7 +135,21 @@ public final class BridgeServer {
                 System.out.println("client connected");
                 // Starting the game here, rather than at boot, means the first
                 // prompt cannot be sent before anyone is listening to hear it.
-                new Thread(() -> onReady.accept(gui), "into-play-game").start();
+                //
+                // On Forge's own pool, not a thread of ours, and that is not a
+                // detail. ThreadUtil.isGameThread() is
+                //
+                //     Thread.currentThread().getName().startsWith("Game")
+                //
+                // and GameAction.invoke() consults it: on the game thread it
+                // runs the work inline, otherwise it hands it to that pool. A
+                // game running on a thread named anything else therefore sends
+                // its own nested work away to a stranger — which is how paying
+                // for a spell deadlocked. The engine parked in applyManaToCost
+                // waiting for a latch that the mana ability, now executing on
+                // an unrelated pool thread, never got far enough to release.
+                // No exception, no log line, just a game that stops.
+                forge.util.ThreadUtil.invokeInGameThread(() -> onReady.accept(gui));
             }
             super.userEventTriggered(ctx, evt);
         }
@@ -211,6 +225,36 @@ public final class BridgeServer {
                 case "board":
                     g.sendBoard();
                     break;
+                // Aim the spell at something the engine cannot see. The whole
+                // fork is for this message.
+                //
+                // Reaching into the live input is deliberate rather than lazy:
+                // Forge's targeting state lives in InputSelectTargets — its own
+                // target set, its min/max accounting, its OK button — and going
+                // around it via sa.getTargets() would add the phantom while
+                // leaving the input thinking nothing had been chosen.
+                case "offTable": {
+                    if (!(c instanceof forge.player.PlayerControllerHuman human)) {
+                        break;
+                    }
+                    forge.gamemodes.match.input.Input in0 = human.getInputQueue().getInput();
+                    if (!(in0 instanceof forge.gamemodes.match.input.InputSelectTargets targeting)) {
+                        System.out.println("nothing is waiting for a target right now");
+                        break;
+                    }
+                    String described = in.has("describe")
+                            ? in.get("describe").getAsString() : null;
+                    String effect = targeting.selectOffTable(described);
+                    if (effect == null) {
+                        // A restriction even a phantom cannot satisfy. Say so
+                        // rather than leaving the player wondering.
+                        g.flashIncorrectAction();
+                        System.out.println("the ability refused a phantom: " + described);
+                        break;
+                    }
+                    g.offTableAimed(g.focus(), described, effect);
+                    break;
+                }
                 default:
                     System.out.println("unknown message from client: " + t);
             }

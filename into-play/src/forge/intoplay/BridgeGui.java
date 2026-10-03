@@ -10,6 +10,7 @@ import forge.game.GameEntityView;
 import forge.game.GameState;
 import forge.game.card.CardView;
 import forge.game.event.GameEvent;
+import forge.game.event.GameEventSpellResolved;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -82,6 +83,7 @@ public class BridgeGui extends AbstractGuiGame {
     private final Map<Integer, SynchronousQueue<JsonArray>> pending = new ConcurrentHashMap<>();
 
     private PlayerView currentPlayer;
+    private volatile String focus;
 
     /**
      * Who the last pair of buttons belonged to.
@@ -348,6 +350,86 @@ public class BridgeGui extends AbstractGuiGame {
     public void showCombat() {
         send(msg("combat"));
     }
+
+    /**
+     * The engine is waiting to be pointed at something.
+     *
+     * <p>This is the message the whole fork exists to make possible. Forge sends
+     * the cards it will accept; the bridge adds {@code offTable}, because what
+     * the player actually wants to aim at is usually not in that list — it is on
+     * the table, in front of someone else, and the engine has never heard of it.
+     */
+    @Override
+    public void setSelectables(final Iterable<CardView> cards, final int min, final int max) {
+        super.setSelectables(cards, min, max);
+        JsonObject o = msg("targeting");
+        o.addProperty("min", min);
+        o.addProperty("max", max);
+        o.addProperty("offTable", true);
+        JsonArray arr = new JsonArray();
+        if (cards != null) {
+            for (CardView c : cards) {
+                JsonObject j = new JsonObject();
+                j.addProperty("id", c.getId());
+                j.addProperty("name", c.getName());
+                arr.add(j);
+            }
+        }
+        o.add("cards", arr);
+        send(o);
+    }
+
+    @Override
+    public void clearSelectables() {
+        super.clearSelectables();
+        send(msg("targetingDone"));
+    }
+
+    /**
+     * Something has been aimed off the table — but has not happened yet.
+     *
+     * <p>Two messages, not one, and the split is the point. A spell that is
+     * merely aimed can still be countered, and telling the room "3 damage" the
+     * moment the arrow is drawn would be a lie often enough to matter. So this
+     * is `aimed`, for the arrow; {@link #handleGameEvent} sends `resolved` when
+     * the engine actually finishes with it, and that is the one carrying
+     * <i>tell them</i>.
+     *
+     * <p>Keyed by Forge's stack description, which both ends get from the same
+     * {@code sa.getStackDescription()} — so the match is an identity check on
+     * one string rather than a guess about ordering.
+     *
+     * <p><b>{@code effect} has a hole in it, deliberately left there.</b> Forge
+     * renders a spell's targets by narrowing them to Cards and Players — the
+     * same assumption as the damage loop and the target whitelist, a third
+     * place — so a phantom renders as nothing and Bolt reads "deals 3 damage
+     * to ." Patching that would mean patching it in two hundred effect
+     * classes, one per card type, which is not a fork anyone could maintain.
+     *
+     * <p>So the gapped string is passed through as-is, and {@code line} carries
+     * what the room actually needs: the spell and what it was aimed at. The
+     * number comes from the card's own text, which the client already has for
+     * every card it draws. The engine's job was to let the spell happen
+     * legally; the sentence belongs to the table.
+     */
+    public void offTableAimed(final String spell, final String described, final String effect) {
+        pendingOffTable.put(effect, new String[] {spell, described});
+        JsonObject o = msg("offTable");
+        o.addProperty("phase", "aimed");
+        o.addProperty("spell", spell);
+        o.addProperty("target", described);
+        o.addProperty("effect", effect);
+        o.addProperty("line", line(spell, described));
+        send(o);
+    }
+
+    private static String line(final String spell, final String described) {
+        return (spell == null ? "That spell" : spell)
+                + " \u2192 " + (described == null ? "something off the table" : described);
+    }
+
+    /** Off-table declarations waiting for their spell to finish resolving. */
+    private final Map<String, String[]> pendingOffTable = new ConcurrentHashMap<>();
 
     /** No avatars over the wire; the client draws its own seats. */
     @Override
@@ -804,6 +886,28 @@ public class BridgeGui extends AbstractGuiGame {
         o.addProperty("kind", event.getClass().getSimpleName());
         o.addProperty("text", String.valueOf(event));
         send(o);
+
+        // The moment the fork exists for. The spell was legal, it has finished
+        // resolving, and the engine did nothing to the phantom because a
+        // phantom is neither a Card nor a Player and every effect tests for
+        // exactly those two. Nothing is corrupted; nothing is reported either.
+        // This is the report.
+        if (event instanceof GameEventSpellResolved r) {
+            String[] aimed = pendingOffTable.remove(r.stackDescription());
+            if (aimed != null) {
+                JsonObject t = msg("offTable");
+                t.addProperty("phase", "resolved");
+                t.addProperty("spell", aimed[0]);
+                t.addProperty("target", aimed[1]);
+                t.addProperty("effect", r.stackDescription());
+                t.addProperty("line", line(aimed[0], aimed[1]));
+                t.addProperty("fizzled", r.hasFizzled());
+                // The engine has done all it can. Everything after this
+                // happens out loud, between people.
+                t.addProperty("tellThem", !r.hasFizzled());
+                send(t);
+            }
+        }
     }
 
     @Override
@@ -820,15 +924,29 @@ public class BridgeGui extends AbstractGuiGame {
         send(o);
     }
 
+    /**
+     * The card the engine wants looked at.
+     *
+     * <p>Worth more than it appears: {@code InputSelectTargets.showMessage()}
+     * calls this with the spell doing the targeting, so remembering it here is
+     * how the bridge knows which card an off-table declaration belongs to —
+     * without another accessor patched into Forge to ask.
+     */
     @Override
     public void setCard(final CardView card) {
         if (card == null) {
             return;
         }
+        focus = card.getName();
         JsonObject o = msg("focus");
         o.addProperty("cardId", card.getId());
         o.addProperty("name", card.getName());
         send(o);
+    }
+
+    /** The last card the engine put in focus; the spell, during targeting. */
+    public String focus() {
+        return focus;
     }
 
     /** Which card's abilities the desktop UI would be showing in its panel. */

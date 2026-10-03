@@ -122,6 +122,33 @@ jobs:
           }
           kill $SERVER 2>/dev/null || true
 
+      # The one card, end to end, and the reason the fork exists: Lightning
+      # Bolt aimed at a creature the engine cannot see. It is a separate step
+      # from the game above because it asserts something different — not that a
+      # game runs, but that a spell with no legal target in the engine's state
+      # can still be cast, paid for, resolved, and reported to the room.
+      - name: Can Bolt be aimed at something that is not in the game?
+        run: |
+          java -Xmx2g -cp "engine/*:engine" forge.intoplay.BridgeMain forge-gui/res 8100 \
+            > bolt-server.log 2>&1 &
+          SERVER=$!
+          for _ in $(seq 1 90); do
+            grep -q "bridge listening" bolt-server.log && break
+            sleep 1
+          done
+          grep -q "bridge listening" bolt-server.log || {
+            echo "::error::the bridge never came up"
+            grep -v "not assigned to any set" bolt-server.log | tail -20
+            exit 1
+          }
+          node into-play/bolt-client.mjs ws://localhost:8100/play 45 || {
+            echo "::error::Bolt could not be aimed off the table"
+            grep -v "not assigned to any set" bolt-server.log | tail -30
+            kill $SERVER 2>/dev/null || true
+            exit 1
+          }
+          kill $SERVER 2>/dev/null || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: into-play-engine

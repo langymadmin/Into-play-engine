@@ -367,6 +367,44 @@ public final class InputSelectTargets extends InputSyncronizedBase {
         return targets.contains(card) && targets.size() > oldTargetCount;
     }
 
+    /**
+     * into-play: aim this ability at something the engine cannot see.
+     *
+     * <p>At a kitchen table the other players' cards are cardboard, so "bolt
+     * that creature" has no legal target and the engine refuses the cast — the
+     * rule it exists to enforce, and exactly the one that has to bend. A
+     * {@link forge.game.PhantomEntity} stands in: legal for anything, holding
+     * nothing. The spell is cast legally, it resolves, and the player tells
+     * their opponent out loud.
+     *
+     * <p>Written in the style of the two selectForMacro methods above, which
+     * exist for the same reason — something outside the UI driving a selection
+     * a human would otherwise click.
+     *
+     * @param described what the player said it was; for the log, never parsed
+     * @return Forge's own stack description of what this spell does — the line
+     *         the player now has to say out loud — or null if the ability
+     *         refused the phantom. A refusal is a real answer rather than a
+     *         bug: it means the restriction is one even a phantom cannot
+     *         satisfy, and the caller should say so instead of pretending.
+     */
+    public String selectOffTable(final String described) {
+        final forge.game.Game game = sa.getHostCard().getGame();
+        // nextCardId() rather than an arbitrary number, so the phantom's view
+        // lives in the game's own id space and cannot collide with a real card.
+        final forge.game.PhantomEntity phantom =
+                new forge.game.PhantomEntity(game, game.nextCardId(), described);
+        if (!sa.canTarget(phantom)) {
+            return null;
+        }
+        addTarget(phantom);
+        // The stack description after the target is added, so it names the
+        // phantom: "Lightning Bolt deals 3 damage to their creature". The
+        // caller has no other way to learn what the spell claims to do, and
+        // this is the string Forge itself would show on the stack.
+        return sa.getStackDescription();
+    }
+
     protected Boolean onDividedAsYouChoose(GameObject go) {
         String apiBasedMessage = "Distribute how much to ";
         if (sa.getApi() == ApiType.DealDamage) {
