@@ -1,0 +1,94 @@
+# Tell us when upstream Forge has moved, and whether it collides with us.
+#
+# This fork patches Forge's targeting code, which is also where upstream churns
+# hardest — Magic ships new cards constantly and new cards need new targeting
+# behaviour. Left alone, the two drift apart quietly, and the longer the gap the
+# worse the eventual merge.
+#
+# So once a week this tries the merge on a throwaway branch and reports:
+#
+#   clean    -> opens a pull request; review and merge whenever suits
+#   conflict -> opens an issue naming the files, so it is a known task rather
+#               than a surprise six months from now
+#
+# Nothing is pushed to `into-play` automatically. The point is to make the work
+# visible on a schedule, not to do it unsupervised.
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '37 6 * * 1'   # Mondays, early. Odd minute on purpose: the hour and
+                           # half hour are the busiest slots on shared runners.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: into-play
+          fetch-depth: 0          # a merge needs real history, not a shallow clone
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/Card-Forge/forge.git
+          git fetch upstream master
+
+      - name: Anything new?
+        id: behind
+        run: |
+          COUNT=$(git rev-list --count HEAD..upstream/master)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "$COUNT commit(s) behind upstream"
+
+      - name: Try the merge
+        if: steps.behind.outputs.count != '0'
+        id: merge
+        run: |
+          git config user.name  "upstream-sync"
+          git config user.email "noreply@github.com"
+          git checkout -b upstream-sync/$(date +%Y-%m-%d)
+          if git merge --no-edit upstream/master; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            # Record which files collided before undoing the attempt.
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+            git merge --abort
+          fi
+
+      - name: Clean — open a pull request
+        if: steps.behind.outputs.count != '0' && steps.merge.outputs.clean == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          git push origin "$BRANCH"
+          gh pr create --base into-play --head "$BRANCH" \
+            --title "Upstream sync: ${{ steps.behind.outputs.count }} commits" \
+            --body "Merged \`upstream/master\` with no conflicts. Worth a look at the engine build before merging, but nothing of ours needed re-applying."
+
+      - name: Conflict — open an issue
+        if: steps.behind.outputs.count != '0' && steps.merge.outputs.clean == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Upstream has moved ${{ steps.behind.outputs.count }} commits ahead and the merge no longer applies cleanly."
+            echo
+            echo "Files that collided:"
+            echo
+            sed 's/^/- `/; s/$/`/' /tmp/conflicts.txt
+            echo
+            echo "These are almost certainly our engine patches meeting upstream's own changes to the same code."
+            echo "Merge locally, reconcile by hand, and run \`./into-play/run-spike.sh Spike\` before pushing."
+            echo
+            echo "Sooner is cheaper than later: each week of drift makes the next merge harder."
+          } > /tmp/body.md
+          gh issue create --title "Upstream sync needs hands: ${{ steps.behind.outputs.count }} commits behind" --body-file /tmp/body.md

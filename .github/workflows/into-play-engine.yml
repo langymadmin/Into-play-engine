@@ -1,0 +1,70 @@
+# Build the headless engine once, here, so nobody has to build it again.
+#
+# Compiling Forge takes about fifteen minutes. Without this, every machine that
+# wants to run the engine pays that: a dev container that gets wiped between
+# sessions pays it every single time. This builds it on GitHub's runner and
+# keeps the result, so afterwards everyone downloads instead of compiles.
+#
+# The same output is what gets shipped — to a server, or bundled into a tablet
+# app — so this is the release build, not only a developer convenience.
+#
+# Only the engine modules are built. The desktop, Android and iOS front ends are
+# not needed: into-play brings its own UI and talks to the engine over a socket.
+name: Engine build
+
+on:
+  push:
+    branches: [into-play]
+    paths-ignore: ['**.md']
+  workflow_dispatch:   # lets you run it by hand from the Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven      # keeps the downloaded dependencies between runs
+
+      - name: Build engine modules
+        run: >
+          mvn -B -q -pl forge-gui -am
+          -DskipTests -Dcheckstyle.skip=true -Dmaven.javadoc.skip=true
+          install
+
+      # One directory holding the four module jars and every dependency, so
+      # running the engine is `java -cp 'engine/*' ...` with nothing to resolve.
+      - name: Collect the jars
+        run: |
+          mkdir -p engine
+          cp forge-core/target/forge-core-*.jar \
+             forge-game/target/forge-game-*.jar \
+             forge-ai/target/forge-ai-*.jar \
+             forge-gui/target/forge-gui-*.jar engine/
+          mvn -B -q -pl forge-gui dependency:copy-dependencies \
+              -DincludeScope=runtime -DoutputDirectory="$PWD/engine"
+          # google-collections is the pre-Guava library with the same package
+          # names. If it lands on the classpath it shadows Guava and fails much
+          # later with a confusing NoSuchMethodError, so drop it here.
+          rm -f engine/google-collections-*.jar
+          echo "jars: $(ls engine | wc -l), size: $(du -sh engine | cut -f1)"
+
+      - name: Smoke test — does the engine still start a game?
+        run: |
+          javac -cp "engine/*" -d engine into-play/*.java
+          timeout 300 java -cp "engine/*:engine" Spike forge-gui/res | tee spike.log
+          grep -q "coin toss" spike.log || {
+            echo "::error::engine did not reach the coin toss — the headless path is broken"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: into-play-engine
+          path: engine/
+          retention-days: 30
