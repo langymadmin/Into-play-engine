@@ -240,6 +240,64 @@ public final class BridgeMain {
     static final String OFF_TABLE = "Phantom";
 
     /**
+     * A gui for the seat that cannot answer.
+     *
+     * <p>The phantom seat is a real engine {@link Player}, which is what makes
+     * its life total real and its permanents targetable. The consequence is that
+     * the engine asks it things — "target opponent chooses one of these three
+     * cards" is a question for them, not for us — and the person it stands for
+     * is holding cardboard, not a device. Left alone, those questions are put to
+     * a seat that will never answer, and the game stops.
+     *
+     * <p>So: the phantom exists and can never act. Every question aimed at it
+     * arrives on our screen, labelled as theirs, and the person holding the
+     * tablet answers on their behalf — which is what already happens out loud at
+     * the table.
+     *
+     * <p>Forge needs no change to allow it. {@code PlayerControllerHuman.setGui}
+     * is per controller, not per game, so that seat can be handed a gui of its
+     * own. This is that gui: it is the real one, with every call wrapped in a
+     * note saying who it was for. A {@link Proxy} rather than ~90 delegating
+     * methods, which is also how this file already adapts {@code IGuiBase}.
+     *
+     * <p>The finally is load-bearing. An exception out of a prompt would
+     * otherwise leave the tag set, and the next question we are genuinely asked
+     * would be presented as the opponent's.
+     *
+     * <h2>Not wired up yet, and why</h2>
+     *
+     * Handing this to {@code human.setGui} hangs the game. The same controller
+     * is also given to {@code FControlGameEventHandler}, which reaches the gui
+     * back through {@code human.getGui()} — so the proxy wraps the EVENT path as
+     * well as the question path, and the priority input parks in
+     * {@code IGuiGame.awaitInput} on a latch that is never released. Watched in a
+     * thread dump rather than guessed at.
+     *
+     * <p>The mechanism is still right; the placement is wrong. The tag belongs
+     * around the calls the engine makes to ASK that seat something, not around
+     * everything that seat's controller ever touches. The likely fix is to
+     * narrow it — either wrap only the asking methods, or set the tag from
+     * inside {@code PlayerControllerHuman}'s own entry points rather than at the
+     * gui boundary — and that needs a session with a thread dump open, not a
+     * guess at the end of one.
+     */
+    static forge.gui.interfaces.IGuiGame proxyGuiFor(final BridgeGui gui, final String seat) {
+        return (forge.gui.interfaces.IGuiGame) Proxy.newProxyInstance(
+                forge.gui.interfaces.IGuiGame.class.getClassLoader(),
+                new Class<?>[] { forge.gui.interfaces.IGuiGame.class },
+                (p, method, args) -> {
+                    gui.setAskingFor(seat);
+                    try {
+                        return method.invoke(gui, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    } finally {
+                        gui.setAskingFor(null);
+                    }
+                });
+    }
+
+    /**
      * Stop the off-table seat from drawing, so it cannot deck itself out.
      *
      * <p>The problem is real and was watched happening: that seat is a genuine
@@ -391,6 +449,11 @@ public final class BridgeMain {
             if (!(p.getController() instanceof PlayerControllerHuman human)) {
                 continue;
             }
+            // NOT YET the proxy gui — see proxyGuiFor below for the mechanism
+            // and why it is still parked. Wiring it here hangs the game: the
+            // same gui reference is handed to FControlGameEventHandler, so the
+            // proxy ends up wrapping the event path as well as the question
+            // path, and the priority input never releases its latch.
             human.setGui(gui);
             // Twice, and in this order: the first clears whatever view the gui
             // held from a previous game so the second does not copy into stale

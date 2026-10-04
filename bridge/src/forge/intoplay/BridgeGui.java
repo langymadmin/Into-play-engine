@@ -102,6 +102,39 @@ public class BridgeGui extends AbstractGuiGame {
     }
 
     /**
+     * Which seat the engine is currently asking — set around every call made
+     * through the off-table seat's own gui. See {@code BridgeMain.proxyGuiFor}.
+     *
+     * <p>This is the answer to the question the whole fork turns on. The seat
+     * across the table is a real engine {@link forge.game.player.Player}: the
+     * engine asks it things, and it can never answer, because the person it
+     * stands for is holding cardboard and not a device. So every question aimed
+     * at it has to arrive on OUR screen, labelled as theirs, and be answered by
+     * the person holding the tablet on their behalf.
+     *
+     * <p>Forge already allows this without being changed: {@code setGui} is per
+     * controller, not per game, so that seat can be handed a gui of its own.
+     * What that gui does is set this field, forward to this one, and clear it.
+     * The socket stays single, the client gets one extra field, and no engine
+     * code has an opinion about any of it.
+     *
+     * <p>Volatile rather than ThreadLocal on purpose: Forge runs one game thread,
+     * and a question asked on it is answered before the next one starts. A
+     * ThreadLocal here would be stricter and would also be wrong — the socket
+     * thread reads this when composing the reply.
+     */
+    private volatile String askingFor;
+
+    public void setAskingFor(final String seat) {
+        askingFor = seat;
+    }
+
+    /** The seat a question belongs to, or null when it is simply ours. */
+    private String asking() {
+        return askingFor;
+    }
+
+    /**
      * Who the last pair of buttons belonged to.
      *
      * <p>With one socket this is redundant, and that was checked rather than
@@ -345,6 +378,10 @@ public class BridgeGui extends AbstractGuiGame {
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
         JsonObject o = msg("prompt");
         o.addProperty("player", playerView == null ? null : playerView.getName());
+        // The seat the question is FOR, as opposed to `player`, which is
+        // getCurrentPlayer() and is stale for anything not driven by an input.
+        // When this is set, the band says "they choose — you decide for them".
+        o.addProperty("askingFor", asking());
         o.addProperty("text", message);
         if (card != null) {
             o.addProperty("card", card.getName());
@@ -632,6 +669,11 @@ public class BridgeGui extends AbstractGuiGame {
         }
 
         JsonObject o = msg("choose");
+        // Whose question this is. Null when it is simply ours; the off-table
+        // seat's name when the engine is asking the side of the table that
+        // cannot answer, and the person holding the tablet has to answer for
+        // them. Intuition's "target opponent chooses one" is exactly this.
+        o.addProperty("askingFor", asking());
         o.addProperty("message", message);
         o.addProperty("min", min);
         o.addProperty("max", max);
@@ -1055,6 +1097,19 @@ public class BridgeGui extends AbstractGuiGame {
     }
 
     /**
+     * Stop arming the off-table seat's auto-pass, to find out what it costs.
+     *
+     * <p>The seat has to stop taking turns, and it does — that is the Skip$ True
+     * replacement on the command-zone card, which is a different mechanism. This
+     * flag is only about the per-turn yield, which exists to spare the player
+     * pressing OK at every step of their own turn for a seat that will never
+     * respond. The question it answers: does that yield also swallow the
+     * QUESTIONS the engine asks that seat — Intuition's "target opponent chooses
+     * one", which never arrived.
+     */
+    private static final boolean NO_AUTOPASS = "1".equals(System.getenv("NO_AUTOPASS"));
+
+    /**
      * Every state change in the game passes through here, which is what Into
      * Play's event log has wanted all along: a record written by the thing that
      * knows, rather than by the client guessing after each tap.
@@ -1084,7 +1139,7 @@ public class BridgeGui extends AbstractGuiGame {
         // Only THAT seat. Our own priority during their turn still comes
         // through, because that is where instants live: a bridge that passed
         // for both seats would quietly remove the ability to respond.
-        if (event instanceof GameEventTurnBegan && offTableSeat != null) {
+        if (event instanceof GameEventTurnBegan && offTableSeat != null && !NO_AUTOPASS) {
             // The cast is necessary: autoPassCancel is on IGameController but
             // autoPassUntilEndOfTurn is not — only the human controller has it.
             if (controllerFor(offTableSeat) instanceof forge.player.PlayerControllerHuman h) {
