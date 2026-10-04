@@ -1,0 +1,42 @@
+# Intuition — the engine asks the OTHER side a question.
+#
+#   Search your library for three cards and reveal them. Target opponent
+#   chooses one. Put that card into your hand and the rest into your
+#   graveyard. Then shuffle.
+#
+# Chosen because of one word in its script: Chooser$ Targeted. The choice is
+# not ours. At a kitchen table the opponent makes it by reaching over to the
+# tablet, or by saying it out loud while we tap — so the UI has to be able to
+# say "this question is not yours" and still accept the answer on this screen.
+# Nothing in UI 2.5 can express that; it is the clearest case for the priority
+# band naming who is being asked.
+#
+# It also exercises, in one cast: a library search with a count (3 of N), a
+# reveal, a choice made by another seat, and two different destinations for
+# the cards that were and were not chosen.
+#
+# Library is small and known so the three found cards are predictable in the
+# log. Three Islands untapped pays for Intuition (2U) with nothing left over,
+# which is deliberate: if mana were spare, a failure to pay would hide inside
+# a successful cast.
+
+humanlife=20
+humanhand=Intuition
+# No |Tapped modifier, and NOT |Tapped:False. GameState tests the modifier with
+# info.startsWith("Tapped") and then calls tap() — so "Tapped:False" taps the
+# card and silently throws the ":False" away. Untapped is the absence of the
+# word. Written out because the failure is invisible: three tapped Islands look
+# identical to three untapped ones in the state file, and the only symptom is a
+# spell that cannot be paid for.
+humanbattlefield=Island;Island;Island
+humanlibrary=Llanowar Elves;Grizzly Bears;Shivan Dragon;Counterspell;Island
+humangraveyard=
+
+ailife=20
+aihand=
+aibattlefield=
+
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

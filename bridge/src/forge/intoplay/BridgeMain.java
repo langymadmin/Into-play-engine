@@ -137,6 +137,8 @@ public final class BridgeMain {
     public static void main(final String[] args) throws Exception {
         final String res = args.length > 0 ? args[0] : "forge-gui/res";
         final int port = args.length > 1 ? Integer.parseInt(args[1]) : 8099;
+        // A scenario file, if one was named. See loadState().
+        final String state = args.length > 2 ? args[2] : System.getenv("STATE");
 
         // Order matters. GuiBase first: ForgeConstants' paths are static final
         // and computed from getAssetsDir() the first time the class is touched,
@@ -149,7 +151,7 @@ public final class BridgeMain {
 
         BridgeServer server = new BridgeServer(port, gui -> {
             try {
-                runGame(res, gui);
+                runGame(res, gui, state);
             } catch (Throwable t) {
                 System.out.println("[game ended] " + t);
                 t.printStackTrace(System.out);
@@ -304,7 +306,76 @@ public final class BridgeMain {
                 + " canDraw=" + seat.canDraw());
     }
 
-    static void runGame(final String res, final BridgeGui gui) {
+    /**
+     * Put the board where the scenario wants it, using Forge's own dev format.
+     *
+     * <p>Why a state file rather than playing to the position: a test that plays
+     * a game to reach a board is testing the route, not the destination. The
+     * Bolt client had to draw a Mountain, hold priority, remember whether it had
+     * already played a land — none of which has anything to do with whether a
+     * Bolt can be aimed off-table, and all of which can fail for reasons that
+     * look like the thing under test failing. Forge already solved this for its
+     * own puzzles: {@link GameState} parses the position and applies it.
+     *
+     * <p>The format is Forge's, so a scenario here is also a scenario their dev
+     * mode can load:
+     *
+     * <pre>
+     *   humanlife=20
+     *   humanhand=Intuition;Island
+     *   humanbattlefield=Island|Tapped:False;Island|Tapped:False;Island|Tapped:False
+     *   ailife=20
+     *   activeplayer=human
+     *   activephase=MAIN1
+     * </pre>
+     *
+     * <p>{@code human} is seat 0 (ours) and {@code ai} is seat 1 (the off-table
+     * seat). Both have to appear: applyToGame throws if the state names fewer
+     * players than the game has.
+     *
+     * <p><b>The trap, found by reading setupPlayerState:</b> it clears every
+     * zone first, and its own comment says "e.g. in command zone". That is the
+     * zone the off-table seal lives in, so applying a state silently unseals the
+     * proxy and it starts taking turns and decking itself again. Hence the
+     * re-seal below, after the state rather than before.
+     */
+    static void applyState(final Game game, final String path) {
+        java.util.List<String> lines;
+        try {
+            lines = java.nio.file.Files.readAllLines(java.nio.file.Paths.get(path));
+        } catch (java.io.IOException e) {
+            System.out.println("[state] cannot read " + path + ": " + e);
+            return;
+        }
+        // Blank lines have to go before parse(). GameState.splitLine starts with
+        // line.charAt(0) to test for a '#' comment and never checks the length,
+        // so an empty line throws StringIndexOutOfBounds from inside a stream —
+        // and the trace points at parseLine, not at the file. Comments are fine;
+        // it is only the blank separators between them that bite. Dropped here
+        // rather than patched there, to keep the fork at two patched files.
+        lines = lines.stream()
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toList());
+        forge.game.GameState st = new forge.game.GameState();
+        st.parse(lines);
+        // Already on the game thread inside the start hook, so applyGameOnThread
+        // would do; applyToGame's invoke() runs it inline from here and keeps us
+        // on Forge's own entry point.
+        st.applyToGame(game);
+        System.out.println("[state] applied " + path);
+        for (Player p : game.getPlayers()) {
+            System.out.printf("[state]   %-12s life %-4d hand %-3d library %-3d "
+                            + "battlefield %-3d graveyard %d%n",
+                    p.getName(), p.getLife(),
+                    p.getZone(ZoneType.Hand).size(),
+                    p.getZone(ZoneType.Library).size(),
+                    p.getZone(ZoneType.Battlefield).size(),
+                    p.getZone(ZoneType.Graveyard).size());
+        }
+    }
+
+    static void runGame(final String res, final BridgeGui gui, final String statePath) {
         current = gui;
 
         List<RegisteredPlayer> registered = new ArrayList<>();
@@ -352,7 +423,26 @@ public final class BridgeMain {
         }
 
         System.out.println("=== starting game ===");
-        match.startGame(game);
+        if (statePath == null || statePath.isBlank()) {
+            match.startGame(game);
+        } else {
+            // The hook runs after opening hands are dealt and the first turn is
+            // set up, but before priority is offered (PhaseHandler.setupFirstTurn
+            // sets givePriorityToPlayer=false around it). So the client's first
+            // prompt is already in the seeded position: nothing has to be played
+            // to get there, and nothing can go wrong on the way.
+            match.startGame(game, () -> {
+                applyState(game, statePath);
+                // applyState clears the command zone along with everything else,
+                // which takes the seal with it. Re-seal, and let the assertion
+                // inside sealOffTableLibrary print so a silent unseal is visible.
+                for (Player p : game.getPlayers()) {
+                    if (OFF_TABLE.equals(p.getName())) {
+                        sealOffTableLibrary(game, p);
+                    }
+                }
+            });
+        }
 
         System.out.println("=== game over ===");
         for (Player p : game.getPlayers()) {

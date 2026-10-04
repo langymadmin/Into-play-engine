@@ -240,14 +240,7 @@ public class BridgeGui extends AbstractGuiGame {
                 }
                 JsonArray arr = new JsonArray();
                 for (CardView c : in) {
-                    JsonObject j = new JsonObject();
-                    j.addProperty("id", c.getId());
-                    j.addProperty("name", c.getName());
-                    // Tapped matters to a client that has to pay for something:
-                    // a second Bolt needs a second untapped land, and "find a
-                    // Mountain" would keep picking the one already spent.
-                    j.addProperty("tapped", c.isTapped());
-                    arr.add(j);
+                    arr.add(card(c));
                 }
                 if (arr.size() > 0) {
                     s.add(z.name().toLowerCase(), arr);
@@ -261,6 +254,62 @@ public class BridgeGui extends AbstractGuiGame {
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
         o.addProperty("turn", getGameView().getTurn());
         send(o);
+    }
+
+    /**
+     * One card, as much of it as the client can use.
+     *
+     * <p>This used to be id, name and tapped — and that was the wrong kind of
+     * mistake. {@link CardView} has always carried power, toughness, counters,
+     * attacking, summoning sickness and the rest; writing three fields and then
+     * building client logic around the gap meant reimplementing, badly, things
+     * the engine already knew. Everything here is a plain read of a CardView
+     * accessor. Nothing is computed, because anything computed here would be a
+     * second opinion about a game the engine is already running.
+     *
+     * <p>Zone-dependent on purpose: a card in a hidden zone gets its identity
+     * and nothing else, because power and counters are battlefield facts and
+     * sending them for a card in a library is both meaningless and a leak.
+     */
+    private static JsonObject card(final CardView c) {
+        JsonObject j = new JsonObject();
+        j.addProperty("id", c.getId());
+        j.addProperty("name", c.getName());
+        j.addProperty("tapped", c.isTapped());
+        j.addProperty("faceDown", c.isFaceDown());
+        j.addProperty("token", c.isToken());
+
+        final CardView.CardStateView st = c.getCurrentState();
+        if (st != null) {
+            // The type line as the engine sees it, so a client never has to
+            // guess from the name whether something is a land.
+            j.addProperty("types", String.valueOf(st.getType()));
+            if (st.isCreature()) {
+                j.addProperty("power", st.getPower());
+                j.addProperty("toughness", st.getToughness());
+            }
+        }
+
+        if (c.getZone() == forge.game.zone.ZoneType.Battlefield) {
+            j.addProperty("attacking", c.isAttacking());
+            j.addProperty("blocking", c.isBlocking());
+            // isSick() is the one that matters to a player: it already accounts
+            // for being a creature, being on the battlefield, and haste.
+            // hasSickness() alone is true for cards that could never attack.
+            j.addProperty("sick", c.isSick());
+            j.addProperty("damage", c.getDamage());
+        }
+
+        com.google.common.collect.Multiset<forge.game.card.CounterType> ctrs = c.getCounters();
+        if (ctrs != null && !ctrs.isEmpty()) {
+            JsonObject counters = new JsonObject();
+            for (com.google.common.collect.Multiset.Entry<forge.game.card.CounterType> e
+                    : ctrs.entrySet()) {
+                counters.addProperty(e.getElement().toString(), e.getCount());
+            }
+            j.add("counters", counters);
+        }
+        return j;
     }
 
     /** The controller for a named seat, or null if this gui does not hold it. */
@@ -674,6 +723,33 @@ public class BridgeGui extends AbstractGuiGame {
         if (abilities == null || abilities.isEmpty()) {
             return null;
         }
+        // Always announce the list, even when it is not a question.
+        //
+        // This is the message UI 3.0's ring is drawn from, and the ring has to
+        // show what a card can do whether or not there is a choice to make.
+        // Agatha's Soul Cauldron is the case that proves it: once Llanowar Elves
+        // is exiled under the Cauldron and a creature has a +1/+1 counter, that
+        // creature gains "{T}: Add {G}" — one ability, so Forge never asks, so
+        // under the old shortcut the only way a player could find out was to tap
+        // and watch it happen. The engine knew; the player could not see.
+        //
+        // Informational on purpose: the return path below is unchanged, so a
+        // single ability is still auto-selected and existing clients are
+        // unaffected. The ring reads this; the prompt still drives the game.
+        JsonObject list = msg("abilities");
+        list.addProperty("cardId", hostCard == null ? 0 : hostCard.getId());
+        list.addProperty("card", hostCard == null ? null : hostCard.getName());
+        JsonArray arr = new JsonArray();
+        for (int i = 0; i < abilities.size(); i++) {
+            JsonObject j = new JsonObject();
+            j.addProperty("i", i);
+            j.addProperty("label", String.valueOf(abilities.get(i)));
+            arr.add(j);
+        }
+        list.add("options", arr);
+        list.addProperty("asked", abilities.size() > 1);
+        send(list);
+
         if (abilities.size() == 1) {
             return abilities.get(0);
         }
@@ -1013,6 +1089,29 @@ public class BridgeGui extends AbstractGuiGame {
             // autoPassUntilEndOfTurn is not — only the human controller has it.
             if (controllerFor(offTableSeat) instanceof forge.player.PlayerControllerHuman h) {
                 h.autoPassUntilEndOfTurn();
+                // Say WHOSE yield it is, because Forge's own report does not.
+                //
+                // AbstractGuiGame.updateAutoPassPrompt sends "Yielding until end
+                // of turn" through showPromptMessage(getCurrentPlayer(), …), and
+                // getCurrentPlayer() is only refreshed by InputProxy from the
+                // owner of the current *input*. An auto-pass is not an input, so
+                // that text arrives labelled with whichever seat happened to be
+                // there last — watched live, the off-table seat's yield was
+                // reported as ours.
+                //
+                // Not cosmetic. A client that reads the seat off the prose and
+                // cancels "its" yield cancels the wrong one; both seats then sit
+                // yielding and the stack never resolves. It hid for two runs of
+                // the Cauldron scenario until the coin toss went the other way.
+                //
+                // updateAutoPassPrompt is final in AbstractGuiGame, so it cannot
+                // be corrected where it is written. It can be stated here, which
+                // is the honest place anyway: this is the line that armed it, so
+                // this is the code that knows which seat it belongs to.
+                JsonObject y = msg("yield");
+                y.addProperty("player", offTableSeat);
+                y.addProperty("offTable", true);
+                send(y);
             }
         }
 

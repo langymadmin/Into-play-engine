@@ -1,0 +1,45 @@
+# Agatha's Soul Cauldron — an activated ability, and then the deep one.
+#
+#   {T}: Exile target card from a graveyard. When a creature card is exiled
+#        this way, put a +1/+1 counter on target creature you control.
+#   (static) Creatures you control with +1/+1 counters on them have all
+#        activated abilities of all creature cards exiled with this.
+#
+# Two tests in one position.
+#
+# The shallow one: can the UI run an activated ability at all? That means
+# getAbilityToPlay returning a real SpellAbilityView list (the ring, fed by
+# the engine instead of by a hand-written array), a {T} cost paid by tapping
+# the source, and a target that is NOT on the battlefield — ValidTgts$ Card
+# with Origin$ Graveyard, so the arrow has to be able to point into a pile.
+# Then a second targeting round for the +1/+1 counter, which only happens if
+# the first target turned out to be a creature.
+#
+# The deep one, and the reason this card was picked: once Llanowar Elves is
+# exiled with the Cauldron and the Bears have a +1/+1 counter, the Bears gain
+# "{T}: Add {G}" — an ability from a card that is in exile, granted by a
+# static on a third card. Activate the ability, then ask the Bears what they
+# can do. If the engine says "add G", the ring will draw it, and no part of
+# Into Play will have been told that Llanowar Elves exists. That is the whole
+# argument for UI 3.0 in one gesture, and it is unreachable by any amount of
+# hand-written menu code.
+#
+# removesummoningsickness so the Bears can use the granted tap ability in the
+# same turn; the Cauldron is an artifact and never had sickness to remove.
+
+humanlife=20
+humanhand=
+# Untapped means no |Tapped modifier at all — "|Tapped:False" starts with
+# "Tapped" and so taps the card (see intuition.txt).
+humanbattlefield=Agatha's Soul Cauldron;Grizzly Bears;Forest
+humangraveyard=Llanowar Elves;Lightning Bolt
+humanlibrary=Island;Island;Island
+
+ailife=20
+aihand=
+aibattlefield=
+
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
