@@ -73,6 +73,10 @@ import java.util.function.Consumer;
  * therefore arrive on a different thread from the one that is blocked, which is
  * exactly what Forge requires — it throws if its input latch is awaited from the
  * thread it considers the UI.
+ *
+ * <p>Taps and presses go one step further, onto the input thread, because they
+ * can themselves end in a question (see channelRead0) and the socket thread is
+ * the only one that can deliver its answer.
  */
 public final class BridgeServer {
 
@@ -81,6 +85,22 @@ public final class BridgeServer {
     private EventLoopGroup boss, work;
     private volatile Channel client;
     private volatile BridgeGui gui;
+
+    /** Messages that drive Forge's input, and so may end up waiting on a question. */
+    private static final java.util.Set<String> ON_INPUT_THREAD =
+            java.util.Set.of("ok", "cancel", "concede", "card", "seat", "offTable");
+
+    /**
+     * One thread, so taps reach Forge in the order they were made. Not named
+     * "Game…": ThreadUtil.isGameThread() goes by that prefix, and this thread
+     * stands where desktop Forge's EDT does, not where the game runs.
+     */
+    private static final java.util.concurrent.ExecutorService INPUT =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread th = new Thread(r, "intoplay-input");
+                th.setDaemon(true);
+                return th;
+            });
 
     /**
      * @param onReady run once a client connects, with the gui it should drive.
@@ -177,6 +197,29 @@ public final class BridgeServer {
                     ? g.controllerFor(in.get("player").getAsString())
                     : g.controller();
 
+            // Anything that hands control to Forge's input runs on the input
+            // thread, never here. Tapping Mind Stone is why: selectCard reaches
+            // getAbilityToPlay, which with two abilities ASKS — and the ask
+            // parks its thread until {"t":"choose"} comes back. On this thread
+            // that answer is the next frame on the same socket, which a parked
+            // event loop can never read. The game froze with no error, and every
+            // later tap queued behind it. Answers, board requests and stops stay
+            // here: they never block, and an answer must not wait behind the
+            // very tap that is waiting for it.
+            if (ON_INPUT_THREAD.contains(t)) {
+                INPUT.execute(() -> {
+                    try {
+                        handle(g, t, in, c);
+                    } catch (RuntimeException e) {
+                        System.out.println("input " + t + " failed: " + e);
+                    }
+                });
+            } else {
+                handle(g, t, in, c);
+            }
+        }
+
+        private void handle(final BridgeGui g, final String t, final JsonObject in, final IGameController c) {
             switch (t) {
                 case "ok":
                     if (c != null) c.selectButtonOk();

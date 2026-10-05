@@ -1,0 +1,27 @@
+# Questions — one card for each kind of thing the engine stops and asks.
+#
+# Intuition and the Cauldron only ever asked through setSelectables, so the
+# blocking questions (choose, order, confirm) had never reached a screen. Each
+# card here is picked to park the engine on a different one:
+#
+#   Opt               scry 1      -> many() with max 1 -> choose
+#   Preordain         scry 2      -> many() then order() -> order, order
+#   Faithless Looting discard 2   -> many() -> order with remaining bounds
+#   Izzet Charm       a mode      -> choose
+#   Mind Stone        {T}: Add {C} and {1},{T},sac: draw -> abilities + choose,
+#                     which is the ring
+#
+# Eight lands so nothing is short of mana. No blank lines: GameState's
+# splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Opt;Preordain;Faithless Looting;Izzet Charm
+humanbattlefield=Island;Island;Island;Island;Mountain;Mountain;Mountain;Mountain;Mind Stone
+humanlibrary=Shivan Dragon;Counterspell;Llanowar Elves;Grizzly Bears;Island;Mountain;Island;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
