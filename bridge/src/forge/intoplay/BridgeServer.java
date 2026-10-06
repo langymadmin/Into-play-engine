@@ -315,7 +315,14 @@ public final class BridgeServer {
                         break;
                     }
                     game.getAction().invoke(() -> {
-                        side.apply(in);
+                        try {
+                            side.apply(in);
+                        } catch (RuntimeException e) {
+                            // invoke's pool swallows exceptions; say it.
+                            System.out.println("table failed: " + e);
+                            e.printStackTrace(System.out);
+                            g.tell(java.util.List.of("The engine could not apply that: " + e.getMessage()));
+                        }
                         game.getAction().checkStateEffects(true);
                         if (BridgeMain.currentForwarder != null) {
                             BridgeMain.currentForwarder.flush();

@@ -180,6 +180,58 @@ final class Declarations {
                     said = card.getName() + (n > 0 ? " got " : " lost ") + Math.abs(n) + " " + type.getName() + " counter(s)";
                     break;
                 }
+                // Their Counterspell, Stifle, Mana Leak they paid for: our spell
+                // or ability comes off the stack. `stack` is its place in the
+                // board's stack list (0 = top), `to` where a spell goes —
+                // graveyard (countered), exile (Dissipate, Memory Lapse is
+                // "library"), hand (Remand). As Forge's CounterEffect does it,
+                // so "can't be countered" is respected and "whenever a spell is
+                // countered" fires.
+                case "countered": {
+                    int index = in.has("stack") ? in.get("stack").getAsInt() : 0;
+                    String to = in.has("to") ? in.get("to").getAsString() : "graveyard";
+                    forge.game.spellability.SpellAbilityStackInstance si = null;
+                    int i = 0;
+                    for (forge.game.spellability.SpellAbilityStackInstance s : game.getStack()) {
+                        if (i++ == index) {
+                            si = s;
+                            break;
+                        }
+                    }
+                    if (si == null) { return; }
+                    forge.game.spellability.SpellAbility tgt = si.getSpellAbility();
+                    Card c = tgt.getHostCard();
+                    java.util.Map<AbilityKey, Object> rep = AbilityKey.mapFromAffected(c);
+                    rep.put(AbilityKey.SpellAbility, tgt);
+                    if (game.getReplacementHandler().run(forge.game.replacement.ReplacementType.Counter, rep)
+                            != forge.game.replacement.ReplacementResult.NotReplaced) {
+                        gui.tell(List.of(c.getName() + " can't be countered — it stays on the stack."));
+                        return;
+                    }
+                    game.getStack().remove(si);
+                    c.unanimateBestow();
+                    if (!tgt.isAbility()) {
+                        switch (to) {
+                            case "exile": game.getAction().exile(c, null, AbilityKey.newMap()); break;
+                            case "hand": game.getAction().moveToHand(c, null, AbilityKey.newMap()); break;
+                            case "library": game.getAction().moveToLibrary(c, 0, null, AbilityKey.newMap()); break;
+                            case "bottom": game.getAction().moveToLibrary(c, -1, null, AbilityKey.newMap()); break;
+                            default: game.getAction().moveToGraveyard(c, null, AbilityKey.newMap());
+                        }
+                    }
+                    try {
+                        java.util.Map<AbilityKey, Object> run = AbilityKey.mapFromCard(c);
+                        run.put(AbilityKey.SpellAbility, tgt);
+                        game.getTriggerHandler().runTrigger(forge.game.trigger.TriggerType.Countered, run, false);
+                    } catch (RuntimeException e) {
+                        // A "whenever countered" trigger that reads the counterspell
+                        // finds cardboard; the counter itself has happened.
+                        System.out.println("countered trigger skipped: " + e);
+                    }
+                    said = (tgt.isAbility() ? c.getName() + "'s ability was countered"
+                            : c.getName() + " was countered" + ("graveyard".equals(to) ? "" : " (to " + to + ")"));
+                    break;
+                }
                 // Fire one of our card's triggered abilities by hand. The event
                 // that triggers it happened at the table — their creature was
                 // sacrificed, died, entered — so the engine never saw it; the

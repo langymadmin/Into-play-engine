@@ -206,7 +206,7 @@ public final class BridgeMain {
                     // already has, on a screen nobody on that side is holding.
                     @Override
                     public void declareBlockers(final Player defender, final forge.game.combat.Combat combat) {
-                        if (OFF_TABLE.equals(p.getName())) {
+                        if (isOffTable(p.getName())) {
                             return;
                         }
                         super.declareBlockers(defender, combat);
@@ -220,7 +220,7 @@ public final class BridgeMain {
                         // seat, p.
                         // Phantom's hand is placeholders: it always keeps,
                         // test positions included.
-                        if (OFF_TABLE.equals(p.getName())) {
+                        if (isOffTable(p.getName())) {
                             return true;
                         }
                         return super.mulliganKeepHand(startsGame, cardsToReturn);
@@ -466,8 +466,39 @@ public final class BridgeMain {
         return d;
     }
 
-    /** The seat that sits across the table. Its cards are cardboard. */
-    static final String OFF_TABLE = "Phantom";
+    /**
+     * The seat that sits across the table. Its cards are cardboard.
+     *
+     * <p>With several opponents (multiplayer Commander) there is one such seat
+     * each, named by the player — "Mark", "Anna" — so "each opponent" counts
+     * right and every life total is a real engine player. OFF_TABLE is the
+     * first of them: the one "their table", blocks and the "who goes first"
+     * answer refer to.
+     */
+    static volatile String OFF_TABLE = "Phantom";
+    static volatile List<String> OPPONENTS = List.of("Phantom");
+
+    static boolean isOffTable(final String name) {
+        return name != null && OPPONENTS.contains(name);
+    }
+
+    /** The opponents the client named, cleaned up: unique, not our seat, at most five. */
+    static List<String> opponentsFrom(final com.google.gson.JsonObject setup) {
+        List<String> out = new ArrayList<>();
+        if (setup != null && setup.has("opponents") && setup.get("opponents").isJsonArray()) {
+            for (com.google.gson.JsonElement e : setup.getAsJsonArray("opponents")) {
+                String n = e.isJsonNull() ? "" : e.getAsString().trim();
+                if (n.isEmpty() || n.equalsIgnoreCase(SEAT) || out.contains(n) || out.size() >= 5) {
+                    continue;
+                }
+                out.add(n.length() > 24 ? n.substring(0, 24) : n);
+            }
+        }
+        if (out.isEmpty()) {
+            out.add("Phantom");
+        }
+        return List.copyOf(out);
+    }
 
     /**
      * A gui for the seat that cannot answer.
@@ -682,13 +713,22 @@ public final class BridgeMain {
         // same way for its 40 life; its commander is cardboard, so it has none.
         Deck ourDeck = ownDeck ? deckFrom(setup, gui) : redDeck(SEAT);
         final boolean commander = !ourDeck.getCommanders().isEmpty();
-        Deck theirDeck = ownDeck ? placeholderDeck() : redDeck(OFF_TABLE);
+        // Who sits across the table, by the names the player gave (one seat
+        // each; "Phantom" when none were given, as test positions expect).
+        OPPONENTS = opponentsFrom(setup);
+        OFF_TABLE = OPPONENTS.get(0);
 
         List<RegisteredPlayer> registered = new ArrayList<>();
         registered.add((commander ? RegisteredPlayer.forCommander(ourDeck) : new RegisteredPlayer(ourDeck))
                 .setPlayer(lobbyPlayer(SEAT, first)));
-        registered.add((commander ? RegisteredPlayer.forCommander(theirDeck) : new RegisteredPlayer(theirDeck))
-                .setPlayer(lobbyPlayer(OFF_TABLE, first)));
+        for (String name : OPPONENTS) {
+            Deck theirDeck = ownDeck ? placeholderDeck() : redDeck(name);
+            registered.add((commander ? RegisteredPlayer.forCommander(theirDeck) : new RegisteredPlayer(theirDeck))
+                    .setPlayer(lobbyPlayer(name, first)));
+        }
+        if (OPPONENTS.size() > 1) {
+            System.out.println("opponents: " + OPPONENTS);
+        }
 
         GameRules rules = new GameRules(commander ? GameType.Commander : GameType.Constructed);
         if (commander) {
@@ -764,7 +804,7 @@ public final class BridgeMain {
         gui.openView(mine);
 
         for (Player p : game.getPlayers()) {
-            if (OFF_TABLE.equals(p.getName())) {
+            if (isOffTable(p.getName())) {
                 sealOffTableLibrary(game, p);
             }
         }
@@ -784,7 +824,7 @@ public final class BridgeMain {
                 // which takes the seal with it. Re-seal, and let the assertion
                 // inside sealOffTableLibrary print so a silent unseal is visible.
                 for (Player p : game.getPlayers()) {
-                    if (OFF_TABLE.equals(p.getName())) {
+                    if (isOffTable(p.getName())) {
                         sealOffTableLibrary(game, p);
                     }
                 }

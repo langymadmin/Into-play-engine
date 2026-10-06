@@ -135,6 +135,61 @@ import java.util.Set;
     }
 
     // ------------------------------------------------------------------
+    // Their cards that change the rules
+    // ------------------------------------------------------------------
+
+    /**
+     * A real permanent of theirs on their battlefield: Blood Moon, Rest in
+     * Peace, Chalice of the Void, Thalia, Elesh Norn. These change the rules
+     * for our cards, so the engine has to have the card itself — a description
+     * would not make Blood Moon turn our nonbasics into Mountains.
+     *
+     * <p>Put there quietly (it is already in play at the table), so its own
+     * enters triggers do not run again. It is a real permanent from then on: our
+     * Disenchant can take it, our Wrath kills their Elesh Norn. The off-table
+     * seat's board is still never drawn; the client lists these in "Their
+     * table" and on the "Their table…" button.
+     */
+    Card putOnBattlefield(final String name) {
+        Player them = them();
+        PaperCard pc = paper(name);
+        if (them == null || pc == null) {
+            return null;
+        }
+        Card c = CardFactory.getCard(pc, them, game);
+        c.setSickness(false);
+        c.setGameTimestamp(game.getNextTimestamp());
+        them.getZone(ZoneType.Battlefield).add(c);
+        game.getAction().checkStaticAbilities();
+        return c;
+    }
+
+    /** It left play at the table. Quietly, as it came. */
+    void removeFromBattlefield(final int cardId) {
+        Player them = them();
+        if (them == null) {
+            return;
+        }
+        for (Card c : new ArrayList<>(them.getCardsIn(ZoneType.Battlefield))) {
+            if (c.getId() == cardId && !creatureMarks.contains(c)) {
+                them.getZone(ZoneType.Battlefield).remove(c);
+            }
+        }
+        game.getAction().checkStaticAbilities();
+    }
+
+    private static PaperCard paper(final String name) {
+        if (name == null) {
+            return null;
+        }
+        PaperCard pc = StaticData.instance().getCommonCards().getCard(name.trim());
+        if (pc == null && name.contains("//")) {
+            pc = StaticData.instance().getCommonCards().getCard(name.substring(0, name.indexOf("//")).trim());
+        }
+        return pc;
+    }
+
+    // ------------------------------------------------------------------
     // The table
     // ------------------------------------------------------------------
 
@@ -232,6 +287,21 @@ import java.util.Set;
             }
         }
         o.add("graveyard", gy);
+        // Their real permanents (rule-changers put there by the player, a
+        // creature stolen back…), without the counted placeholders.
+        JsonArray bf = new JsonArray();
+        if (them != null) {
+            for (Card c : them.getCardsIn(ZoneType.Battlefield)) {
+                if (creatureMarks.contains(c)) {
+                    continue;
+                }
+                JsonObject j = new JsonObject();
+                j.addProperty("id", c.getId());
+                j.addProperty("name", c.getName());
+                bf.add(j);
+            }
+        }
+        o.add("battlefield", bf);
         return o;
     }
 
@@ -248,6 +318,18 @@ import java.util.Set;
         if (in.has("addToGraveyard")) {
             for (JsonElement e : in.getAsJsonArray("addToGraveyard")) {
                 putInGraveyard(e.getAsString());
+            }
+        }
+        if (in.has("removeFromBattlefield")) {
+            for (JsonElement e : in.getAsJsonArray("removeFromBattlefield")) {
+                removeFromBattlefield(e.getAsInt());
+            }
+        }
+        if (in.has("addToBattlefield")) {
+            for (JsonElement e : in.getAsJsonArray("addToBattlefield")) {
+                if (putOnBattlefield(e.getAsString()) == null) {
+                    gui.tell(List.of("The engine doesn't know a card called \"" + e.getAsString() + "\"."));
+                }
             }
         }
         if (in.has("graveyardTypes")) {

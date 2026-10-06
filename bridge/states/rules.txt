@@ -1,0 +1,16 @@
+# Their rule-changers and countering ours: put Blood Moon on their side via
+# "Their table" (Steam Vents becomes a Mountain), aim Disenchant at it, and
+# declare Divination countered while it is on the stack.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Divination;Disenchant
+humanbattlefield=Plains;Plains;Steam Vents;Island;Island
+humanlibrary=Island;Island;Island;Island
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

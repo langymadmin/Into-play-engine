@@ -512,6 +512,7 @@ public class BridgeGui extends AbstractGuiGame {
             o.addProperty("dayTime", game.isDay() ? "day" : "night");
         }
         o.addProperty("offTable", offTableSeat);
+        o.add("opponents", opponentsJson());
         PlayerView turn = gv.getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
         o.addProperty("turn", gv.getTurn());
@@ -1558,7 +1559,15 @@ public class BridgeGui extends AbstractGuiGame {
         // seat am I" is genuinely ambiguous, and inferring it from whoever was
         // prompted first means it changes with the coin toss.
         o.addProperty("offTable", offTableSeat);
+        o.add("opponents", opponentsJson());
         send(o);
+    }
+
+    /** Every off-table seat, first one first (several in multiplayer). */
+    static JsonArray opponentsJson() {
+        JsonArray a = new JsonArray();
+        BridgeMain.OPPONENTS.forEach(a::add);
+        return a;
     }
 
     /**
@@ -1604,10 +1613,12 @@ public class BridgeGui extends AbstractGuiGame {
         // Only THAT seat. Our own priority during their turn still comes
         // through, because that is where instants live: a bridge that passed
         // for both seats would quietly remove the ability to respond.
+        // Every off-table seat, when there are several opponents.
         if (event instanceof GameEventTurnBegan && offTableSeat != null && !NO_AUTOPASS) {
+          for (String seatName : BridgeMain.OPPONENTS) {
             // The cast is necessary: autoPassCancel is on IGameController but
             // autoPassUntilEndOfTurn is not — only the human controller has it.
-            if (controllerFor(offTableSeat) instanceof forge.player.PlayerControllerHuman h) {
+            if (controllerFor(seatName) instanceof forge.player.PlayerControllerHuman h) {
                 h.autoPassUntilEndOfTurn();
                 // Say WHOSE yield it is, because Forge's own report does not.
                 //
@@ -1629,10 +1640,11 @@ public class BridgeGui extends AbstractGuiGame {
                 // is the honest place anyway: this is the line that armed it, so
                 // this is the code that knows which seat it belongs to.
                 JsonObject y = msg("yield");
-                y.addProperty("player", offTableSeat);
+                y.addProperty("player", seatName);
                 y.addProperty("offTable", true);
                 send(y);
             }
+          }
         }
 
         if (event instanceof GameEventTurnPhase tp) {

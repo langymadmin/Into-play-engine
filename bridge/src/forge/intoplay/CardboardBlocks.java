@@ -75,22 +75,25 @@ final class CardboardBlocks {
         }
     }
 
-    private Player seat() {
-        for (Player p : game.getPlayers()) {
-            if (offTable.equals(p.getName())) {
-                return p;
-            }
-        }
-        return null;
-    }
-
     private void askAndPlace() {
         Combat combat = game.getCombat();
-        Player them = seat();
-        if (combat == null || them == null || !combat.isPlayerAttacked(them)) {
+        if (combat == null) {
             return;
         }
-        List<Card> attackers = new ArrayList<>(combat.getAttackersOf(them));
+        // Every off-table seat that was attacked (several, in multiplayer):
+        // one question for all of them, each attacker's stand-in belonging to
+        // the player it attacked.
+        List<Card> attackers = new ArrayList<>();
+        Map<Card, Player> defenderOf = new LinkedHashMap<>();
+        for (Player p : game.getPlayers()) {
+            if (!BridgeMain.isOffTable(p.getName()) || !combat.isPlayerAttacked(p)) {
+                continue;
+            }
+            for (Card a : combat.getAttackersOf(p)) {
+                attackers.add(a);
+                defenderOf.put(a, p);
+            }
+        }
         if (attackers.isEmpty()) {
             return;
         }
@@ -119,7 +122,7 @@ final class CardboardBlocks {
             // how to split the damage, and the answer is already known (see
             // wantedThrough); without it a blocked attacker deals the player
             // nothing, which is the rule.
-            Card standIn = standIn(them, power - through);
+            Card standIn = standIn(defenderOf.get(attacker), power - through);
             combat.addBlocker(attacker, standIn);
             standIns.put(standIn, attacker);
             wanted.put(attacker.getId(), through);
