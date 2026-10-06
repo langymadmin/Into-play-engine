@@ -1,0 +1,17 @@
+# The position a real game froze in: a creature with an enters trigger that
+# hits the opponent (Voldaren Epicure: 1 damage to each opponent and a Blood
+# token) and an instant aimed at a player (Lava Dart, with flashback by
+# sacrificing a Mountain). No blank lines: GameState's splitLine reads
+# charAt(0) without a length check.
+humanlife=20
+humanhand=Voldaren Epicure;Lava Dart;Flashblast;Mountain
+humanbattlefield=Mountain;Mountain;Mountain
+humanlibrary=Mountain;Mountain;Mountain;Mountain;Mountain;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

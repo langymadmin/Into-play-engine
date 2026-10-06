@@ -218,6 +218,13 @@ public class BridgeGui extends AbstractGuiGame {
         send(o);
     }
 
+    /** The game thread died. Nothing more will be asked; the client should say so. */
+    public void sendFatal(final String message) {
+        JsonObject o = msg("fatal");
+        o.addProperty("message", message);
+        send(o);
+    }
+
     private static JsonObject msg(final String type) {
         JsonObject o = new JsonObject();
         o.addProperty("t", type);
@@ -373,6 +380,28 @@ public class BridgeGui extends AbstractGuiGame {
             seats.add(s);
         }
         o.add("seats", seats);
+        // The stack, top first. It belongs to the game, not to a seat — a
+        // player's own Stack zone is always empty in Forge — so it is sent once
+        // here. Each item is a spell or an ability; a triggered ability has a
+        // source card but is not that card, which is why "text" is sent too.
+        JsonArray stack = new JsonArray();
+        if (getGameView().getStack() != null) {
+            for (forge.game.spellability.StackItemView si : getGameView().getStack()) {
+                CardView src = si.getSourceCard();
+                JsonObject j = new JsonObject();
+                j.addProperty("id", src == null ? 0 : src.getId());
+                j.addProperty("name", src == null ? "" : src.getName());
+                if (src != null && src.getCurrentState() != null) {
+                    j.addProperty("types", src.getCurrentState().getType().toString());
+                }
+                j.addProperty("text", si.getText());
+                j.addProperty("ability", si.isAbility());
+                j.addProperty("trigger", si.isTrigger());
+                j.addProperty("controller", si.getActivatingPlayer() == null ? null : si.getActivatingPlayer().getName());
+                stack.add(j);
+            }
+        }
+        o.add("stack", stack);
         o.addProperty("offTable", offTableSeat);
         PlayerView turn = getGameView().getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());

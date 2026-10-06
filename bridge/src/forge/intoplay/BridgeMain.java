@@ -288,6 +288,10 @@ public final class BridgeMain {
             } catch (Throwable t) {
                 System.out.println("[game ended] " + t);
                 t.printStackTrace(System.out);
+                // Say so. A game thread that dies leaves the last prompt on
+                // the client's screen, which reads as "frozen" rather than
+                // "the engine stopped", and the player can only guess.
+                gui.sendFatal(String.valueOf(t));
             }
         }, startOnConnect);
         server.start();
@@ -328,8 +332,16 @@ public final class BridgeMain {
         // is missing, so it gets an empty one rather than a path that happens to
         // exist on somebody's laptop.
         java.nio.file.Path noCustom = java.nio.file.Files.createTempDirectory("into-play-nocustom");
-        new StaticData(reader, null, res + "/editions", noCustom.toString(), res + "/blockdata",
-                "LatestCoreExp", true, false);
+        // The token scripts, which the short constructor leaves out — and
+        // nothing complains until a card makes a token. Then TokenInfo asks
+        // StaticData.getAllTokens(), gets null, and the game thread dies with
+        // an NPE in the middle of resolving: Voldaren Epicure's Blood token
+        // froze a real game with the last prompt still on screen. Forge's own
+        // FModel passes this reader; so does the bridge now.
+        CardStorageReader tokenReader = new CardStorageReader(
+                res + "/tokenscripts", CardStorageReader.ProgressObserver.emptyObserver, false);
+        new StaticData(reader, tokenReader, null, null, res + "/editions", noCustom.toString(),
+                res + "/blockdata", "", "LatestCoreExp", true, false, false, false);
         // TypeLists.txt, and this is the most expensive omission in the whole
         // bootstrap because it fails silently and looks like something else.
         // Without it CardType.Constant.LAND_TYPES and friends are empty, so
