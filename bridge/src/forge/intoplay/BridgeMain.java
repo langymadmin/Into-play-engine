@@ -223,6 +223,23 @@ public final class BridgeMain {
             d.getMain().add(pc, n);
             total += n;
         }
+        // Commanders go in their own section, which is what makes the game put
+        // them in the command zone rather than shuffle them into the library.
+        if (setup.has("commanders") && setup.get("commanders").isJsonArray()) {
+            for (com.google.gson.JsonElement e : setup.getAsJsonArray("commanders")) {
+                String card = e.getAsString().trim();
+                PaperCard pc = db.getCard(card);
+                if (pc == null && card.contains("//")) {
+                    pc = db.getCard(card.substring(0, card.indexOf("//")).trim());
+                }
+                if (pc == null) {
+                    missing.add(card);
+                    continue;
+                }
+                d.getOrCreate(forge.deck.DeckSection.Commander).add(pc, 1);
+                total += 1;
+            }
+        }
         gui.sendDeckReport(name, total, missing);
         System.out.println("deck: " + name + ", " + total + " cards"
                 + (missing.isEmpty() ? "" : ", not found: " + missing));
@@ -562,13 +579,25 @@ public final class BridgeMain {
         // "me", "them", or anything else for Forge's own coin toss.
         final String first = setup != null && setup.has("first") ? setup.get("first").getAsString() : null;
 
+        // A Commander game when the deck names a commander: Forge's own variant,
+        // so the command zone, commander tax, 40 life and 21 commander damage
+        // are the engine's, not the app's. The off-table seat is registered the
+        // same way for its 40 life; its commander is cardboard, so it has none.
+        Deck ourDeck = ownDeck ? deckFrom(setup, gui) : redDeck(SEAT);
+        final boolean commander = !ourDeck.getCommanders().isEmpty();
+        Deck theirDeck = ownDeck ? placeholderDeck() : redDeck(OFF_TABLE);
+
         List<RegisteredPlayer> registered = new ArrayList<>();
-        registered.add(new RegisteredPlayer(ownDeck ? deckFrom(setup, gui) : redDeck(SEAT))
+        registered.add((commander ? RegisteredPlayer.forCommander(ourDeck) : new RegisteredPlayer(ourDeck))
                 .setPlayer(lobbyPlayer(SEAT, first)));
-        registered.add(new RegisteredPlayer(ownDeck ? placeholderDeck() : redDeck(OFF_TABLE))
+        registered.add((commander ? RegisteredPlayer.forCommander(theirDeck) : new RegisteredPlayer(theirDeck))
                 .setPlayer(lobbyPlayer(OFF_TABLE, first)));
 
-        GameRules rules = new GameRules(GameType.Constructed);
+        GameRules rules = new GameRules(commander ? GameType.Commander : GameType.Constructed);
+        if (commander) {
+            rules.addAppliedVariant(GameType.Commander);
+            System.out.println("commander game: " + ourDeck.getCommanders());
+        }
         Match match = new Match(rules, registered, "Bridge");
         Game game = new Game(registered, rules, match);
 

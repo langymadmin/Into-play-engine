@@ -333,6 +333,43 @@ public class BridgeGui extends AbstractGuiGame {
                     s.add(z.name().toLowerCase(), arr);
                 }
             }
+            // Commander games: which cards are this seat's commanders, where
+            // they are, and how often they have been cast — the tax is the
+            // engine's count, not the app's.
+            java.util.List<CardView> cmd = p.getCommanders();
+            if (cmd != null && !cmd.isEmpty()) {
+                JsonArray ca = new JsonArray();
+                for (CardView c : cmd) {
+                    JsonObject j = new JsonObject();
+                    j.addProperty("id", c.getId());
+                    j.addProperty("name", c.getName());
+                    j.addProperty("cast", p.getCommanderCast(c));
+                    j.addProperty("zone", c.getZone() == null ? null : c.getZone().name());
+                    ca.add(j);
+                }
+                s.add("commanders", ca);
+            }
+            // Commander damage this seat has taken, by commander. Twenty-one
+            // from one commander loses the game, and the engine applies that.
+            JsonArray dmg = new JsonArray();
+            for (PlayerView other : getGameView().getPlayers()) {
+                java.util.List<CardView> theirs = other.getCommanders();
+                if (other == p || theirs == null) {
+                    continue;
+                }
+                for (CardView c : theirs) {
+                    int n = p.getCommanderDamage(c);
+                    if (n > 0) {
+                        JsonObject j = new JsonObject();
+                        j.addProperty("from", c.getName());
+                        j.addProperty("damage", n);
+                        dmg.add(j);
+                    }
+                }
+            }
+            if (dmg.size() > 0) {
+                s.add("commanderDamage", dmg);
+            }
             seats.add(s);
         }
         o.add("seats", seats);
