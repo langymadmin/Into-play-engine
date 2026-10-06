@@ -1,0 +1,15 @@
+# Naming a card (Pithing Needle — every card name there is) and choosing a
+# color (Utopia Sprawl, as it enters on a Forest).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Pithing Needle;Utopia Sprawl
+humanbattlefield=Forest;Forest;Forest
+humanlibrary=Forest;Forest;Forest
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

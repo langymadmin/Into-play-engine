@@ -32,15 +32,15 @@ import java.util.Map;
  * straight to damage — every attack unblocked, which is not the game being
  * played in the room.
  *
- * <p>UI-3.0.md's rule for this: <b>just-in-time, never up-front</b>. Nobody sets
- * up the opponent's board. At the moment blocks are declared, the tablet asks
- * "did they block, and with what?" — power, toughness, and the few keywords that
- * change combat arithmetic. For each block a stand-in creature appears on their
- * side with exactly those numbers, Forge declares the block, and Forge does the
- * part people get wrong: first strike, deathtouch, trample, lifelink, damage
- * order. When combat ends the stand-ins go, and what happened to them is said
- * out loud — "their 2/2 blocking Grizzly Bears dies" — because the real card is
- * cardboard and somebody has to put it in a graveyard.
+ * <p>UI-3.0.md's rule for this: <b>just-in-time, never up-front</b>, and the
+ * player's own rule on top of it: <b>nothing typed</b>. At the moment blocks
+ * are declared the tablet asks one number per attacker — how much damage gets
+ * through to them — starting at the attacker's full power, taken down to what
+ * happened at the table. An attacker held back gets a stand-in blocker that
+ * only soaks the difference (no power, indestructible), so the engine deals
+ * exactly that much to their life and lifelink and "deals combat damage"
+ * still count. Whether their creature died is said at the table; whether ours
+ * did is declared, as any other effect of their cardboard is.
  *
  * <p>The stand-ins are placed into the zone directly rather than through
  * moveTo: the real creature was already on the table, so nothing "entered", and
@@ -95,7 +95,11 @@ final class CardboardBlocks {
             return;
         }
 
-        JsonArray answer = gui.askBlocks(attackers);
+        // One number per attacker: how much damage gets through to them. The
+        // player starts from the attacker's full power and takes it down to
+        // what really happened at the table — 0 for a blocked attacker. Nothing
+        // about their creatures is asked; they are cardboard.
+        JsonArray answer = gui.askThrough(attackers);
 
         for (JsonElement el : answer) {
             if (!el.isJsonObject()) {
@@ -106,42 +110,69 @@ final class CardboardBlocks {
             if (attacker == null) {
                 continue;
             }
-            int power = b.has("power") ? b.get("power").getAsInt() : 0;
-            int toughness = b.has("toughness") ? b.get("toughness").getAsInt() : 1;
-            List<String> keywords = new ArrayList<>();
-            if (b.has("keywords")) {
-                for (JsonElement k : b.getAsJsonArray("keywords")) {
-                    keywords.add(k.getAsString());
-                }
+            int power = Math.max(0, attacker.getNetCombatDamage());
+            int through = b.has("n") ? Math.max(0, Math.min(power, b.get("n").getAsInt())) : power;
+            if (through >= power) {
+                continue; // unblocked: the engine deals it all, as it already would
             }
-            Card standIn = standIn(them, power, toughness, keywords);
+            // Held back: a blocker absorbs the rest. With trample the engine asks
+            // how to split the damage, and the answer is already known (see
+            // wantedThrough); without it a blocked attacker deals the player
+            // nothing, which is the rule.
+            Card standIn = standIn(them, power - through);
             combat.addBlocker(attacker, standIn);
             standIns.put(standIn, attacker);
-            described.put(standIn, "their " + power + "/" + toughness
-                    + (keywords.isEmpty() ? "" : " (" + String.join(", ", keywords).toLowerCase() + ")"));
+            wanted.put(attacker.getId(), through);
         }
         if (!standIns.isEmpty()) {
             game.updateCombatForView();
         }
     }
 
-    private Card standIn(final Player them, final int power, final int toughness, final List<String> keywords) {
-        List<String> script = new ArrayList<>();
-        script.add("Name:Their creature");
-        script.add("Types:Creature");
-        script.add("PT:" + power + "/" + toughness);
-        // Reach, so the block is legal whatever it is blocking: at the table
-        // they already decided it could block, and that is not the engine's
-        // call to overrule with a creature it cannot see.
-        script.add("K:Reach");
-        for (String k : keywords) {
-            script.add("K:" + k);
+    /** Attacker id -> damage the player said gets through, while combat lasts. */
+    private static final Map<Integer, Integer> wanted = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Stand-in ids, so a damage split that only involves them can be answered for the player. */
+    private static final java.util.Set<Integer> standInIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The damage the player already said this attacker deals to them, when its
+     * only blockers are our stand-ins — so the engine's "assign damage" question
+     * is answered without asking twice. Null when the player has to decide.
+     */
+    static Integer wantedThrough(final int attackerId, final java.util.List<Integer> blockerIds) {
+        Integer n = wanted.get(attackerId);
+        if (n == null) {
+            return null;
         }
+        for (Integer id : blockerIds) {
+            if (!standInIds.contains(id)) {
+                return null;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * A blocker that is only there to absorb damage: no power, so our attacker
+     * takes nothing from it (whether it did at the table is the player's to
+     * declare), indestructible, so the engine never decides that their
+     * creature died — that happened, or did not, on the table — and reach, so
+     * the block is legal whatever it is blocking. Its toughness is the damage
+     * it has to soak up.
+     */
+    private Card standIn(final Player them, final int soak) {
+        List<String> script = new ArrayList<>();
+        script.add("Name:Their blocker");
+        script.add("Types:Creature");
+        script.add("PT:0/" + Math.max(1, soak));
+        script.add("K:Reach");
+        script.add("K:Indestructible");
         script.add("Oracle:A creature on the table, standing in for this combat.");
         PaperCard pc = new PaperCard(CardRules.fromScript(script), "", CardRarity.Common);
         Card c = CardFactory.getCard(pc, them, game);
         c.setSickness(false);
         them.getZone(ZoneType.Battlefield).add(c);
+        standInIds.add(c.getId());
         return c;
     }
 
@@ -153,14 +184,11 @@ final class CardboardBlocks {
         for (Map.Entry<Card, Card> e : standIns.entrySet()) {
             Card standIn = e.getKey();
             Card attacker = e.getValue();
-            String them = described.get(standIn);
-            boolean theyDied = !standIn.isInZone(ZoneType.Battlefield);
-            boolean oursDied = !attacker.isInZone(ZoneType.Battlefield);
-            String line = them + " blocking " + attacker.getName()
-                    + (theyDied ? " dies" : " survives"
-                        + (standIn.getDamage() > 0 ? " with " + standIn.getDamage() + " damage" : ""))
-                    + (oursDied ? "; your " + attacker.getName() + " dies" : "");
-            lines.add(line);
+            // What the engine knows is the damage dealt; whether their
+            // creature survived it is theirs to say, at the table.
+            if (standIn.getDamage() > 0) {
+                lines.add(attacker.getName() + " dealt " + standIn.getDamage() + " to their blocker.");
+            }
             // The stand-in goes, wherever combat left it. A survivor's real card
             // is still on the table; a dead one's goes to a graveyard made of
             // cardboard. Either way the engine has no use for it after this.
@@ -170,7 +198,11 @@ final class CardboardBlocks {
         }
         standIns.clear();
         described.clear();
-        gui.tell(lines);
+        wanted.clear();
+        standInIds.clear();
+        if (!lines.isEmpty()) {
+            gui.tell(lines);
+        }
         System.out.println("cardboard blocks: " + lines);
     }
 

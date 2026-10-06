@@ -188,6 +188,25 @@ public class BridgeGui extends AbstractGuiGame {
      * {@code {"attacker":id,"power":p,"toughness":t,"keywords":[…]}}, one per
      * block, and an empty list means nothing blocked. See CardboardBlocks.
      */
+    /**
+     * "How much gets through?" — one number per attacker, for the player to
+     * take down from its full combat damage. Answered [{attacker, n}].
+     */
+    public JsonArray askThrough(final java.util.List<forge.game.card.Card> attackers) {
+        JsonObject o = msg("through");
+        JsonArray list = new JsonArray();
+        for (forge.game.card.Card a : attackers) {
+            JsonObject j = new JsonObject();
+            j.addProperty("id", a.getId());
+            j.addProperty("name", a.getName());
+            j.addProperty("damage", Math.max(0, a.getNetCombatDamage()));
+            j.addProperty("trample", a.hasKeyword(forge.game.keyword.Keyword.TRAMPLE));
+            list.add(j);
+        }
+        o.add("attackers", list);
+        return ask(o);
+    }
+
     public JsonArray askBlocks(final java.util.List<forge.game.card.Card> attackers) {
         JsonObject o = msg("blocks");
         JsonArray list = new JsonArray();
@@ -1061,6 +1080,24 @@ public class BridgeGui extends AbstractGuiGame {
         // lethal (toughness less damage already marked), and the defender when
         // trample lets damage through. Answered as [{id, n}], id 0 for the
         // defender — Forge's own convention is a null key for the defender.
+        // Already answered when the only blockers are our stand-ins: the player
+        // said how much gets through when blocks were declared.
+        if (attacker != null && blockers != null && !blockers.isEmpty()) {
+            java.util.List<Integer> ids = new java.util.ArrayList<>();
+            for (CardView b : blockers) {
+                ids.add(b.getId());
+            }
+            Integer through = CardboardBlocks.wantedThrough(attacker.getId(), ids);
+            if (through != null) {
+                Map<CardView, Integer> auto = new java.util.HashMap<>();
+                int rest = damage - (defender != null ? through : 0);
+                auto.put(blockers.get(0), Math.max(0, rest));
+                if (defender != null && through > 0) {
+                    auto.put(null, through);
+                }
+                return auto;
+            }
+        }
         JsonObject o = msg("damage");
         o.addProperty("attacker", attacker == null ? "" : attacker.getName());
         o.addProperty("attackerId", attacker == null ? 0 : attacker.getId());

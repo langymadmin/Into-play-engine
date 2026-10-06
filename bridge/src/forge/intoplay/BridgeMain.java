@@ -362,9 +362,34 @@ public final class BridgeMain {
         // no mana, Lightning Bolt can never be paid for, and the engine simply
         // waits forever inside applyManaToCost with no error anywhere. Hours.
         forge.model.FModel.loadDynamicGamedata();
+        shareCardDatabaseWithFModel();
         System.out.printf("cards loaded: %d in %d ms%n",
                 StaticData.instance().getCommonCards().getUniqueCards().size(),
                 System.currentTimeMillis() - t0);
+    }
+
+    /**
+     * Point Forge's FModel at the card database already loaded above.
+     *
+     * <p>Some of Forge's GUI code asks FModel.getMagicDb() rather than
+     * StaticData.instance() — naming a card (Pithing Needle, Meddling Mage)
+     * is one. FModel builds its own database on first use from card readers it
+     * expects its own startup to have set; the bridge never runs that startup,
+     * so the readers are null and the game thread died mid-resolution. Rather
+     * than load all 34,000 cards a second time, FModel's memoized supplier is
+     * told to hand back the database that exists. Read and set, not patched.
+     */
+    static void shareCardDatabaseWithFModel() {
+        try {
+            java.lang.reflect.Field f = forge.model.FModel.class.getDeclaredField("magicDb");
+            f.setAccessible(true);
+            Object supplier = f.get(null);
+            java.lang.reflect.Field d = supplier.getClass().getDeclaredField("delegate");
+            d.setAccessible(true);
+            d.set(supplier, (com.google.common.base.Supplier<StaticData>) StaticData::instance);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.out.println("could not share the card database with FModel: " + e);
+        }
     }
 
     /**
