@@ -811,8 +811,14 @@ public class BridgeGui extends AbstractGuiGame {
         if (host == null || !host.isInZone(ZoneType.Battlefield)) {
             return;
         }
+        // Three wordings give the card back: "exiled with" (Parallax Wave),
+        // "until … leaves" (Banishing Light), and "when … leaves the
+        // battlefield, return the exiled card" (Oblivion Ring, Journey to
+        // Nowhere). A plain exile says none of them.
         String text = String.valueOf(host.getOracleText()).toLowerCase();
-        if (!text.contains("exiled with") && !text.contains("until")) {
+        boolean givesBack = text.contains("exiled with") || text.contains("until")
+                || (text.contains("leaves the battlefield") && text.contains("return"));
+        if (!givesBack) {
             return;
         }
         pendingExileWith.put(effect, new Object[] {host.getId(), host.getName(),

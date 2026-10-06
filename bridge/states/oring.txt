@@ -1,0 +1,15 @@
+# Oblivion Ring aimed at their permanent (a phantom): remembered under the
+# O-Ring, and when it leaves, "it comes back - return it to them".
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Oblivion Ring
+humanbattlefield=Plains;Plains;Plains
+humanlibrary=Plains;Plains;Plains
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

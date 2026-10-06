@@ -54,6 +54,10 @@ Write-Host "  cards   $cards scripts in $Res" -ForegroundColor DarkGray
 # Semicolon, not colon. The ".\engine\*" wildcard is Java's own jar-directory
 # syntax; it is not a shell glob, so it must stay quoted.
 $cp = "$EngineDir\*;$EngineDir"
+# Classes patched in Forge itself and compiled locally (engine-override\)
+# go first, so they win over the copies inside the downloaded jars until the
+# next engine build includes them.
+if (Test-Path "engine-override") { $cp = "engine-override;$cp" }
 
 Write-Host "`n  starting the bridge on ws://localhost:$Port/play" -ForegroundColor Cyan
 Write-Host "  (first start loads 34k card scripts — about five seconds)`n" -ForegroundColor DarkGray

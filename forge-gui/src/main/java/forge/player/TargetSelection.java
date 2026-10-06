@@ -48,6 +48,17 @@ import java.util.function.Predicate;
  * @version $Id: TargetSelection.java 25148 2014-03-12 08:28:52Z swordshine $
  */
 public class TargetSelection {
+    /**
+     * Into Play: whether a target off the table — a {@link forge.game.PhantomEntity},
+     * the opponent's cardboard — may be chosen. When it may, an ability with no
+     * legal target on the table is not cancelled before it is asked: Oblivion
+     * Ring entering with nothing of ours to exile still asks, so the player can
+     * point it at their card across the table. Off by default, so stock Forge
+     * behaves as stock Forge; the bridge switches it on.
+     */
+    private static volatile boolean offTableTargets = false;
+    public static void setOffTableTargets(final boolean on) { offTableTargets = on; }
+
     private final PlayerControllerHuman controller;
     private final SpellAbility ability;
 
@@ -110,7 +121,7 @@ public class TargetSelection {
         }
         mandatory &= hasEnoughCandidates;
 
-        if (!hasEnoughCandidates && !hasEnoughTargets) {
+        if (!hasEnoughCandidates && !hasEnoughTargets && !offTableTargets) {
             // Cancel ability if there aren't any valid Candidates
             return false;
         }
@@ -158,7 +169,7 @@ public class TargetSelection {
                 if (nonCardTargets.size() == 1) {
                     return ability.getTargets().add(nonCardTargets.get(0));
                 }
-                if (nonCardTargets.isEmpty()) {
+                if (nonCardTargets.isEmpty() && !offTableTargets) {
                     return false;
                 }
             }

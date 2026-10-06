@@ -288,6 +288,15 @@ public final class BridgeMain {
         Lang.createInstance("en-US");
         Localizer.getInstance().initialize("en-US", res + "/languages/");
         loadCards(res);
+        // The opponent's cards are cardboard: an ability with nothing legal to
+        // target on the table may still be pointed at one of theirs.
+        // Reflective, so a bridge running on an engine built before this switch
+        // existed still starts — it just keeps stock Forge's behaviour.
+        try {
+            forge.player.TargetSelection.class.getMethod("setOffTableTargets", boolean.class).invoke(null, true);
+        } catch (ReflectiveOperationException e) {
+            System.out.println("this engine predates off-table targets for abilities with no target on the table");
+        }
 
         // With a scenario file the game starts the moment a client connects, as
         // it always has — that is what the test clients expect. Without one it
