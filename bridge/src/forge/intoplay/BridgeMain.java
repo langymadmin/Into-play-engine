@@ -162,6 +162,18 @@ public final class BridgeMain {
                         return super.chooseStartingPlayer(isFirstGame);
                     }
 
+                    // The off-table seat's blocks are cardboard, declared on the
+                    // tablet just before this runs (CardboardBlocks). Forge's own
+                    // InputBlock would ask that seat again, about stand-ins it
+                    // already has, on a screen nobody on that side is holding.
+                    @Override
+                    public void declareBlockers(final Player defender, final forge.game.combat.Combat combat) {
+                        if (OFF_TABLE.equals(p.getName())) {
+                            return;
+                        }
+                        super.declareBlockers(defender, combat);
+                    }
+
                     @Override
                     public boolean mulliganKeepHand(final Player startsGame, final int cardsToReturn) {
                         // The argument is the player who goes FIRST, not the
@@ -594,6 +606,9 @@ public final class BridgeMain {
         // twice — the whole log, doubled, for as long as the bridge existed.
         forge.gui.control.GameEventForwarder forwarder = new forge.gui.control.GameEventForwarder(gui);
         game.subscribeToEvents(forwarder);
+        // Blocks with cardboard: asked when blockers are declared against the
+        // off-table seat, played out by stand-ins, reported when combat ends.
+        game.subscribeToEvents(new CardboardBlocks(game, gui, OFF_TABLE));
         // And it must watch each seat's input queue. The forwarder buffers
         // events and sends them in batches; its last flush is meant to happen
         // when the engine stops to wait for a player — which it only hears

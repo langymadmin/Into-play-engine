@@ -1,0 +1,23 @@
+# Combat — three creatures ready to attack a real player.
+#
+# The off-table seat is a real engine Player, so combat damage has somewhere
+# to land: its life is the number both people at the table agree on. Its
+# creatures are cardboard, so it has none in the engine — a block is
+# something the room declares, not something the engine can see.
+#
+# Shivan Dragon for flying and firebreathing ({R}: +1/+0, an activated ability
+# to pump during combat), Grizzly Bears as the plain attacker, Llanowar Elves
+# as the one you might keep home. Mountains to pay for the firebreathing.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Giant Growth;Forest
+humanbattlefield=Grizzly Bears;Llanowar Elves;Shivan Dragon;Mountain;Mountain;Mountain;Forest
+humanlibrary=Forest;Forest;Forest;Forest;Forest;Forest
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

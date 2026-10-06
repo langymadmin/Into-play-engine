@@ -182,6 +182,42 @@ public class BridgeGui extends AbstractGuiGame {
         send(o);
     }
 
+    /**
+     * "Did they block?" — asked when blockers are declared against the
+     * off-table seat. One entry per attacker; the answer is a list of
+     * {@code {"attacker":id,"power":p,"toughness":t,"keywords":[…]}}, one per
+     * block, and an empty list means nothing blocked. See CardboardBlocks.
+     */
+    public JsonArray askBlocks(final java.util.List<forge.game.card.Card> attackers) {
+        JsonObject o = msg("blocks");
+        JsonArray list = new JsonArray();
+        for (forge.game.card.Card a : attackers) {
+            JsonObject j = new JsonObject();
+            j.addProperty("id", a.getId());
+            j.addProperty("name", a.getName());
+            j.addProperty("power", a.getNetPower());
+            j.addProperty("toughness", a.getNetToughness());
+            list.add(j);
+        }
+        o.add("attackers", list);
+        return ask(o);
+    }
+
+    /**
+     * Something the engine worked out that the room has to act on: their
+     * creature died, so the real card goes to their graveyard. Not a question,
+     * and nothing waits on it.
+     */
+    public void tell(final java.util.List<String> lines) {
+        JsonObject o = msg("tell");
+        JsonArray a = new JsonArray();
+        for (String s : lines) {
+            a.add(s);
+        }
+        o.add("lines", a);
+        send(o);
+    }
+
     private static JsonObject msg(final String type) {
         JsonObject o = new JsonObject();
         o.addProperty("t", type);
