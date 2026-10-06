@@ -149,7 +149,11 @@ public final class BridgeServer {
                         ch.pipeline()
                                 .addLast(new HttpServerCodec())
                                 .addLast(new HttpObjectAggregator(1 << 20))
-                                .addLast(new WebSocketServerProtocolHandler("/play", null, true))
+                                // checkStartsWith (the last true): "/play?role=hand"
+                                // must reach the handshake too. The three-argument
+                                // form's true is allowExtensions, and an exact path
+                                // match silently dropped any query string.
+                                .addLast(new WebSocketServerProtocolHandler("/play", null, true, 1 << 20, false, true))
                                 .addLast(new Handler());
                     }
                 });
@@ -162,10 +166,24 @@ public final class BridgeServer {
         if (work != null) work.shutdownGracefully();
     }
 
+    /**
+     * Screens that joined the running game rather than starting one: the
+     * phone's hand view ({@code /play?role=hand}). One seat, two screens — the
+     * tablet shows the table, the phone shows the hand — and both hear
+     * everything and may act: a card cast from the phone is the same tap as
+     * one cast from the tablet.
+     */
+    private final java.util.Set<Channel> joined = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     private void send(final String json) {
         Channel c = client;
         if (c != null && c.isActive()) {
             c.writeAndFlush(new TextWebSocketFrame(json));
+        }
+        for (Channel j : joined) {
+            if (j.isActive()) {
+                j.writeAndFlush(new TextWebSocketFrame(json));
+            }
         }
     }
 
@@ -173,7 +191,20 @@ public final class BridgeServer {
 
         @Override
         public void userEventTriggered(final ChannelHandlerContext ctx, final Object evt) throws Exception {
-            if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
+            if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete hs) {
+                // A second screen for the same game (the phone's hand): join,
+                // do not start anything. It is told who sits where — the
+                // "open" the tablet got when the game began — and asks for the
+                // board itself, as every client does on connect.
+                if (hs.requestUri() != null && hs.requestUri().contains("role=hand") && gui != null) {
+                    joined.add(ctx.channel());
+                    System.out.println("hand screen joined");
+                    for (String m : gui.catchUp()) {
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
+                    }
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
                 client = ctx.channel();
                 gui = new BridgeGui(BridgeServer.this::send);
                 System.out.println("client connected");
@@ -392,8 +423,14 @@ public final class BridgeServer {
 
         @Override
         public void channelInactive(final ChannelHandlerContext ctx) {
+            if (joined.remove(ctx.channel())) {
+                System.out.println("hand screen disconnected");
+                return;
+            }
             System.out.println("client disconnected");
-            client = null;
+            if (client == ctx.channel()) {
+                client = null;
+            }
         }
 
         @Override

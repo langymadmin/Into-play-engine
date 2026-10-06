@@ -159,9 +159,38 @@ public class BridgeGui extends AbstractGuiGame {
     // ---------------------------------------------------------------------
 
     private void send(final JsonObject o) {
-        if (sink != null) {
-            sink.send(o.toString());
+        String s = o.toString();
+        // What a screen joining mid-game needs to catch up: where the game is
+        // and what it is waiting for, per seat. The board it asks for itself.
+        String t = o.has("t") ? o.get("t").getAsString() : "";
+        if ("phase".equals(t) || "turn".equals(t)) {
+            latest.put(t, s);
+        } else if ("prompt".equals(t) || "buttons".equals(t)) {
+            String who = o.has("player") && !o.get("player").isJsonNull() ? o.get("player").getAsString() : "";
+            latest.put(t + ":" + who, s);
         }
+        if (sink != null) {
+            sink.send(s);
+        }
+    }
+
+    /** The last phase, turn, and each seat's prompt and buttons — see {@link #catchUp}. */
+    private final java.util.Map<String, String> latest = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Messages that bring a screen joining mid-game up to date, oldest kind first. */
+    public java.util.List<String> catchUp() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (lastOpen != null) {
+            out.add(lastOpen);
+        }
+        for (String k : java.util.List.of("turn", "phase")) {
+            if (latest.containsKey(k)) {
+                out.add(latest.get(k));
+            }
+        }
+        latest.forEach((k, v) -> { if (k.startsWith("buttons:")) out.add(v); });
+        latest.forEach((k, v) -> { if (k.startsWith("prompt:")) out.add(v); });
+        return out;
     }
 
     /**
@@ -1560,7 +1589,15 @@ public class BridgeGui extends AbstractGuiGame {
         // prompted first means it changes with the coin toss.
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
+        lastOpen = o.toString();
         send(o);
+    }
+
+    /** The "open" message as sent, for a screen that joins later (the phone's hand). */
+    private volatile String lastOpen;
+
+    public String lastOpen() {
+        return lastOpen;
     }
 
     /** Every off-table seat, first one first (several in multiplayer). */
