@@ -1,0 +1,16 @@
+# The library panels: a search (Rampant Growth), surveil 2 (Notion Rain —
+# two engine questions, one panel), surveil 1 (Unexplained Disappearance —
+# asked as Library / Graveyard buttons). Grizzly Bears to bounce.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Rampant Growth;Notion Rain;Unexplained Disappearance
+humanbattlefield=Forest;Forest;Island;Island;Swamp;Swamp;Grizzly Bears
+humanlibrary=Llanowar Elves;Counterspell;Shivan Dragon;Forest;Plains;Island;Mountain;Forest
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

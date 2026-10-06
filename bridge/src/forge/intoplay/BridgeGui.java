@@ -907,6 +907,15 @@ public class BridgeGui extends AbstractGuiGame {
             JsonObject j = new JsonObject();
             j.addProperty("i", i);
             j.addProperty("label", label(choices.get(i), display));
+            // Which card this choice is, when it is one: the client draws the
+            // card (its own library search, its own scry panel) rather than a
+            // list of names, and knows where the card is.
+            if (choices.get(i) instanceof CardView cv) {
+                j.addProperty("cardId", cv.getId());
+                if (cv.getCurrentState() != null) {
+                    j.addProperty("types", String.valueOf(cv.getCurrentState().getType()));
+                }
+            }
             opts.add(j);
         }
         return opts;
@@ -1155,13 +1164,12 @@ public class BridgeGui extends AbstractGuiGame {
         }
         o.add("options", options(all, null));
 
+        // An empty answer is an answer: "none of them". many() is built on this
+        // call — surveil's "which go to the graveyard", scry's "which go to the
+        // bottom" — and treating empty as "use Forge's default" sent every
+        // card there when the player chose none. The client never sends an
+        // empty answer to a question that needs every card ordered.
         List<T> ordered = pick(ask(o), all);
-        if (ordered.isEmpty()) {
-            ordered = destChoices == null ? new ArrayList<>(all) : new ArrayList<>(destChoices);
-            if (destChoices != null && sourceChoices != null) {
-                ordered.addAll(sourceChoices);
-            }
-        }
         return new OrderResult<>(ordered, false);
     }
 
