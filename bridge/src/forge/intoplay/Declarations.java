@@ -180,17 +180,94 @@ final class Declarations {
                     said = card.getName() + (n > 0 ? " got " : " lost ") + Math.abs(n) + " " + type.getName() + " counter(s)";
                     break;
                 }
+                // Fire one of our card's triggered abilities by hand. The event
+                // that triggers it happened at the table — their creature was
+                // sacrificed, died, entered — so the engine never saw it; the
+                // player, who did, says which trigger goes off.
+                case "triggers": {
+                    if (card == null) { return; }
+                    List<String> labels = new java.util.ArrayList<>();
+                    for (forge.game.trigger.Trigger t : card.getTriggers()) {
+                        labels.add(t.toString());
+                    }
+                    gui.sendTriggerList(card.getId(), card.getName(), labels);
+                    return;
+                }
+                case "fire": {
+                    if (card == null) { return; }
+                    int i = in.has("i") ? in.get("i").getAsInt() : 0;
+                    List<forge.game.trigger.Trigger> all = new java.util.ArrayList<>(card.getTriggers());
+                    if (i < 0 || i >= all.size()) { return; }
+                    fire(game, all.get(i), me);
+                    said = "fired " + card.getName() + "'s trigger";
+                    break;
+                }
                 default:
                     System.out.println("unknown declaration: " + in);
                     return;
             }
             game.getAction().checkStateEffects(true);
+            if (BridgeMain.currentForwarder != null) {
+                BridgeMain.currentForwarder.flush();
+            }
             System.out.println("declared: " + said);
             // The engine's own events already narrate the result in the log;
             // the board is sent at once so the screen does not wait for the
             // next prompt to show it.
             gui.sendBoard();
         }
+    }
+
+    /**
+     * Put one trigger on the stack as if its event had happened.
+     *
+     * <p>Forge's own path for this, TriggerHandler.runSingleTriggerInternal,
+     * is private; it is reached by reflection rather than copied, so the
+     * wrapping, optional "you may", trigger controller and AbilityTriggered
+     * follow-ups are all Forge's. Nothing in Forge is patched.
+     *
+     * <p>The event's object — the creature that died, the card that entered —
+     * was cardboard. Many triggers read it ("gain life equal to its power"),
+     * and a missing one is a crash, so a blank stand-in of theirs fills the
+     * slot: never put in any zone, never seen, and anything reading its
+     * characteristics reads nothing. The player types nothing.
+     */
+    private static void fire(final Game game, final forge.game.trigger.Trigger trigger, final Player me) {
+        Player them = null;
+        for (Player p : game.getPlayers()) {
+            if (p != me) {
+                them = p;
+            }
+        }
+        java.util.Map<AbilityKey, Object> params = AbilityKey.newMap();
+        Card blank = blank(game, them != null ? them : me);
+        params.put(AbilityKey.Card, blank);
+        params.put(AbilityKey.CardLKI, blank);
+        params.put(AbilityKey.Origin, "Battlefield");
+        params.put(AbilityKey.Destination, "Graveyard");
+        params.put(AbilityKey.Player, them != null ? them : me);
+        try {
+            java.lang.reflect.Method run = forge.game.trigger.TriggerHandler.class.getDeclaredMethod(
+                    "runSingleTriggerInternal", forge.game.trigger.Trigger.class, java.util.Map.class, Player.class);
+            run.setAccessible(true);
+            run.invoke(game.getTriggerHandler(), trigger, params, me);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw new RuntimeException(e.getCause());
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+        game.getStack().addAllTriggeredAbilitiesToStack();
+    }
+
+    private static Card blank(final Game game, final Player owner) {
+        List<String> script = List.of(
+                "Name:Their card",
+                "Types:Creature",
+                "PT:0/0",
+                "Oracle:A card on the table.");
+        forge.item.PaperCard pc = new forge.item.PaperCard(
+                forge.card.CardRules.fromScript(script), "", forge.card.CardRarity.Common);
+        return forge.game.card.CardFactory.getCard(pc, owner, game);
     }
 
     private static Card find(final Game game, final int id) {

@@ -218,6 +218,22 @@ public class BridgeGui extends AbstractGuiGame {
         send(o);
     }
 
+    /** A card's triggered abilities, for the player to fire one by hand. */
+    public void sendTriggerList(final int cardId, final String name, final java.util.List<String> labels) {
+        JsonObject o = msg("triggerList");
+        o.addProperty("cardId", cardId);
+        o.addProperty("card", name);
+        JsonArray a = new JsonArray();
+        for (int i = 0; i < labels.size(); i++) {
+            JsonObject j = new JsonObject();
+            j.addProperty("i", i);
+            j.addProperty("label", labels.get(i));
+            a.add(j);
+        }
+        o.add("options", a);
+        send(o);
+    }
+
     /** The game thread died. Nothing more will be asked; the client should say so. */
     public void sendFatal(final String message) {
         JsonObject o = msg("fatal");
@@ -334,7 +350,15 @@ public class BridgeGui extends AbstractGuiGame {
                 }
                 JsonArray arr = new JsonArray();
                 for (CardView c : in) {
-                    arr.add(card(c));
+                    JsonObject cj = card(c);
+                    // What of theirs is held under this card (see noteExileWith).
+                    java.util.List<String> under = exiledUnder.get(c.getId());
+                    if (under != null && !under.isEmpty()) {
+                        JsonArray ua = new JsonArray();
+                        under.forEach(ua::add);
+                        cj.add("theirsUnder", ua);
+                    }
+                    arr.add(cj);
                 }
                 if (arr.size() > 0) {
                     s.add(z.name().toLowerCase(), arr);
@@ -679,6 +703,47 @@ public class BridgeGui extends AbstractGuiGame {
 
     /** Off-table declarations waiting for their spell to finish resolving. */
     private final Map<String, String[]> pendingOffTable = new ConcurrentHashMap<>();
+
+    // -----------------------------------------------------------------
+    // Exiled with: their cards held under one of ours
+    //
+    // Parallax Wave, Oblivion Ring, Banishing Light: "exile target creature …
+    // until this leaves the battlefield". Aimed at their creature, the phantom
+    // is exiled with nothing — so when the Wave leaves, the engine has nothing
+    // to give back and the room would have to remember on its own. The bridge
+    // remembers instead: what of theirs went under which of our cards, shown
+    // on that card, and when the card leaves the battlefield, "it comes back —
+    // tell them". The real card's journey (battlefield, or a commander's choice
+    // to go to the command zone) happens at the table.
+    // -----------------------------------------------------------------
+
+    /** Effect string -> {hostId, hostName, described}, until the ability resolves. */
+    private final Map<String, Object[]> pendingExileWith = new ConcurrentHashMap<>();
+    /** Our card id -> what of theirs is exiled with it. */
+    private final Map<Integer, java.util.List<String>> exiledUnder = new ConcurrentHashMap<>();
+
+    /**
+     * Called when something is aimed off the table. Remembered only for an
+     * exile from a permanent whose text gives cards back — "exiled with" or
+     * "until … leaves" — because a plain exile (Swords to Plowshares) returns
+     * nothing and there is nothing to remember.
+     */
+    public void noteExileWith(final forge.game.spellability.SpellAbility sa, final String described, final String effect) {
+        if (sa == null || sa.getApi() != forge.game.ability.ApiType.ChangeZone
+                || !"Exile".equals(sa.getParam("Destination"))) {
+            return;
+        }
+        forge.game.card.Card host = sa.getHostCard();
+        if (host == null || !host.isInZone(ZoneType.Battlefield)) {
+            return;
+        }
+        String text = String.valueOf(host.getOracleText()).toLowerCase();
+        if (!text.contains("exiled with") && !text.contains("until")) {
+            return;
+        }
+        pendingExileWith.put(effect, new Object[] {host.getId(), host.getName(),
+                described == null ? "their card" : described});
+    }
 
     /** No avatars over the wire; the client draws its own seats. */
     @Override
@@ -1292,6 +1357,29 @@ public class BridgeGui extends AbstractGuiGame {
 
         if (event instanceof GameEventTurnPhase tp) {
             sendPhase(tp);
+        }
+
+        // Exiled with one of ours: remembered once the exile has resolved, and
+        // handed back — out loud — when our card leaves the battlefield.
+        if (event instanceof GameEventSpellResolved er && !er.hasFizzled()) {
+            Object[] ex = pendingExileWith.remove(er.stackDescription());
+            if (ex != null) {
+                exiledUnder.computeIfAbsent((Integer) ex[0], k -> new java.util.concurrent.CopyOnWriteArrayList<>())
+                        .add((String) ex[2]);
+                sendBoard();
+            }
+        }
+        if (event instanceof forge.game.event.GameEventCardChangeZone cz
+                && cz.card() != null && cz.from() != null && cz.from().zoneType() == ZoneType.Battlefield) {
+            java.util.List<String> under = exiledUnder.remove(cz.card().getId());
+            if (under != null && !under.isEmpty()) {
+                java.util.List<String> lines = new java.util.ArrayList<>();
+                for (String what : under) {
+                    lines.add(Character.toUpperCase(what.charAt(0)) + what.substring(1) + " comes back — it was exiled with " + cz.card().getName()
+                            + ". Return it to them.");
+                }
+                tell(lines);
+            }
         }
 
         if (event instanceof GameEventSpellResolved r) {

@@ -198,6 +198,14 @@ public final class BridgeMain {
     static volatile Game currentGame;
 
     /**
+     * Its event forwarder, which batches events until the engine next waits for
+     * input. A declaration changes the game without changing the input, so its
+     * events — the log lines, a card leaving the battlefield — sat in the buffer
+     * until something else happened. Declarations flush it themselves.
+     */
+    static volatile forge.gui.control.GameEventForwarder currentForwarder;
+
+    /**
      * A Forge deck from the list the client sent: {@code [{"name","count"}]}.
      *
      * <p>Names come from Moxfield, Archidekt or a pasted list, so they are
@@ -656,6 +664,7 @@ public final class BridgeMain {
         // the forwarder inside the loop above sent every event to the client
         // twice — the whole log, doubled, for as long as the bridge existed.
         forge.gui.control.GameEventForwarder forwarder = new forge.gui.control.GameEventForwarder(gui);
+        currentForwarder = forwarder;
         game.subscribeToEvents(forwarder);
         // Blocks with cardboard: asked when blockers are declared against the
         // off-table seat, played out by stand-ins, reported when combat ends.

@@ -347,6 +347,16 @@ public final class BridgeServer {
                         break;
                     }
                     g.offTableAimed(g.focus(), described, effect);
+                    // Which ability this is decides whether there is something
+                    // to remember (Parallax Wave) — see BridgeGui.noteExileWith.
+                    // The input keeps its spell ability private; read, not patched.
+                    try {
+                        java.lang.reflect.Field f = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
+                        f.setAccessible(true);
+                        g.noteExileWith((forge.game.spellability.SpellAbility) f.get(targeting), described, effect);
+                    } catch (ReflectiveOperationException e) {
+                        System.out.println("could not read the targeting ability: " + e);
+                    }
                     break;
                 }
                 default:

@@ -1,0 +1,17 @@
+# Triggers fired by hand. Their creature dies at the table — sacrificed to
+# our edict, or in a fight the engine never saw — and Blood Artist's "whenever
+# a creature dies" has to go off anyway. Parallax Wave for the exile-with
+# memory: fade counters, exile their creature (a phantom), return on leaving.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Diabolic Edict
+humanbattlefield=Blood Artist;Parallax Wave|Counters:FADE=5;Swamp;Swamp;Swamp;Plains;Plains
+humanlibrary=Swamp;Swamp;Swamp;Swamp;Swamp
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
