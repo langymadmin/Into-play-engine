@@ -641,6 +641,7 @@ public class BridgeGui extends AbstractGuiGame {
         JsonObject targeting = pendingTargeting;
         if (targeting != null) {
             pendingTargeting = null;
+            addValidTargets(targeting, playerView);
             send(targeting);
         }
     }
@@ -756,6 +757,38 @@ public class BridgeGui extends AbstractGuiGame {
         super.clearSelectables();
         pendingTargeting = null;
         send(msg("targetingDone"));
+    }
+
+    /**
+     * What the ability accepts, as Forge writes it ("Permanent.nonLand",
+     * "Creature"), so the client can narrow their deck list to cards the
+     * spell could really be aimed at. Read off the live input, whose spell
+     * ability is private — read, not patched, as in BridgeServer's offTable.
+     */
+    private void addValidTargets(final JsonObject o, final PlayerView playerView) {
+        IGameController c = controllerFor(playerView == null ? null : playerView.getName());
+        if (!(c instanceof forge.player.PlayerControllerHuman human)) {
+            return;
+        }
+        if (!(human.getInputQueue().getInput() instanceof forge.gamemodes.match.input.InputSelectTargets targeting)) {
+            return;
+        }
+        try {
+            java.lang.reflect.Field f = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
+            f.setAccessible(true);
+            forge.game.spellability.SpellAbility sa = (forge.game.spellability.SpellAbility) f.get(targeting);
+            if (sa == null || sa.getTargetRestrictions() == null) {
+                return;
+            }
+            JsonArray valid = new JsonArray();
+            for (String v : sa.getTargetRestrictions().getValidTgts()) {
+                valid.add(v);
+            }
+            o.add("valid", valid);
+            o.addProperty("card", sa.getHostCard() == null ? null : sa.getHostCard().getName());
+        } catch (ReflectiveOperationException e) {
+            System.out.println("could not read the targeting ability: " + e);
+        }
     }
 
     /** A targeting announcement waiting for the input to actually be live. */
