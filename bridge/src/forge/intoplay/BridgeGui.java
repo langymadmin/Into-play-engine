@@ -237,6 +237,24 @@ public class BridgeGui extends AbstractGuiGame {
         send(o);
     }
 
+    /**
+     * "Their table" — asked when one of our spells counts the other side
+     * (Tarmogoyf, Beast of Burden). {@code needs}: "graveyard", "creatures".
+     * Answered [{graveyardTypes:[…], creatures:n}].
+     */
+    public JsonArray askTable(final String card, final java.util.Set<String> needs, final JsonObject current) {
+        JsonObject o = msg("defineTable");
+        o.addProperty("card", card);
+        JsonArray n = new JsonArray();
+        needs.forEach(n::add);
+        o.add("needs", n);
+        o.add("current", current);
+        JsonArray types = new JsonArray();
+        TheirSide.TYPES.forEach(types::add);
+        o.add("types", types);
+        return ask(o);
+    }
+
     /** A card's triggered abilities, for the player to fire one by hand. */
     public void sendTriggerList(final int cardId, final String name, final java.util.List<String> labels) {
         JsonObject o = msg("triggerList");
@@ -446,6 +464,9 @@ public class BridgeGui extends AbstractGuiGame {
             }
         }
         o.add("stack", stack);
+        if (TheirSide.current != null) {
+            o.add("table", TheirSide.current.describe());
+        }
         forge.game.Game game = BridgeMain.currentGame;
         if (game != null && game.getDayTime() != null) {
             o.addProperty("dayTime", game.isDay() ? "day" : "night");

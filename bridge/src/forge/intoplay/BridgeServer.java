@@ -306,6 +306,25 @@ public final class BridgeServer {
                 case "declare":
                     Declarations.apply(BridgeMain.currentGame, g, BridgeMain.SEAT, in);
                     break;
+                // The table, defined from the panel: {graveyardTypes, creatures,
+                // addToGraveyard:[name], removeFromGraveyard:[id]}. See TheirSide.
+                case "table": {
+                    TheirSide side = TheirSide.current;
+                    forge.game.Game game = BridgeMain.currentGame;
+                    if (side == null || game == null) {
+                        break;
+                    }
+                    game.getAction().invoke(() -> {
+                        side.apply(in);
+                        game.getAction().checkStateEffects(true);
+                        if (BridgeMain.currentForwarder != null) {
+                            BridgeMain.currentForwarder.flush();
+                        }
+                        g.sendBoard();
+                    });
+                    break;
+                }
+
                 // The phase dial, as a message. Each named step is one the
                 // player wants to be woken at; an empty list means all of them.
                 case "stops": {

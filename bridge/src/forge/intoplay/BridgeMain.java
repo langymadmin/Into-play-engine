@@ -703,6 +703,9 @@ public final class BridgeMain {
         // Blocks with cardboard: asked when blockers are declared against the
         // off-table seat, played out by stand-ins, reported when combat ends.
         game.subscribeToEvents(new CardboardBlocks(game, gui, OFF_TABLE));
+        // Their deck as a reservoir, and the table defined when our cards
+        // need it. See TheirSide.
+        game.subscribeToEvents(new TheirSide(game, gui, SEAT, OFF_TABLE));
         // And it must watch each seat's input queue. The forwarder buffers
         // events and sends them in batches; its last flush is meant to happen
         // when the engine stops to wait for a player — which it only hears

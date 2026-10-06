@@ -1,0 +1,16 @@
+# Their table: Animate Dead on a creature put in THEIR graveyard before
+# casting (the real card comes back), and Tarmogoyf counting their graveyard,
+# asked for when it is cast. Lightning Bolt in ours for an instant.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Animate Dead;Tarmogoyf
+humanbattlefield=Swamp;Swamp;Forest;Forest
+humanlibrary=Swamp;Swamp;Swamp;Swamp
+humangraveyard=Lightning Bolt
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
