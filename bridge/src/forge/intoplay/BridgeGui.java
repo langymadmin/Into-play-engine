@@ -255,6 +255,43 @@ public class BridgeGui extends AbstractGuiGame {
         return ask(o);
     }
 
+    /**
+     * Two piles (Fact or Fiction, Sauron's Ransom, Gifts Ungiven…): one panel,
+     * asked twice. {@code step} "split": the separator moves cards into pile 1;
+     * answered with the card ids of pile 1. "choose": answered [1] or [2].
+     * {@code faceDown} is Forge's FaceDown$ — "One" hides pile 1 from the
+     * chooser, which is the whole of Sauron's Ransom.
+     */
+    public JsonArray askPiles(final String step, final String seat, final forge.game.spellability.SpellAbility sa,
+                              final Iterable<forge.game.card.Card> pile1, final Iterable<forge.game.card.Card> pile2,
+                              final String faceDown) {
+        JsonObject o = msg("piles");
+        o.addProperty("step", step);
+        o.addProperty("seat", seat);
+        o.addProperty("askingFor", seat);
+        o.addProperty("faceDown", faceDown);
+        if (sa != null && sa.getHostCard() != null) {
+            o.addProperty("card", sa.getHostCard().getName());
+            o.addProperty("cardId", sa.getHostCard().getId());
+        }
+        o.add("pile1", pileJson(pile1));
+        o.add("pile2", pileJson(pile2));
+        return ask(o);
+    }
+
+    private static JsonArray pileJson(final Iterable<forge.game.card.Card> cards) {
+        JsonArray a = new JsonArray();
+        if (cards != null) {
+            for (forge.game.card.Card c : cards) {
+                JsonObject j = new JsonObject();
+                j.addProperty("id", c.getId());
+                j.addProperty("name", c.getName());
+                a.add(j);
+            }
+        }
+        return a;
+    }
+
     /** A card's triggered abilities, for the player to fire one by hand. */
     public void sendTriggerList(final int cardId, final String name, final java.util.List<String> labels) {
         JsonObject o = msg("triggerList");

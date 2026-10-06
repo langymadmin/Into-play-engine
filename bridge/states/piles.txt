@@ -1,0 +1,15 @@
+# Two piles: Fact or Fiction (they split, you choose) and Sauron's Ransom
+# (they split into a face-down and a face-up pile; you choose blind).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Fact or Fiction;Sauron's Ransom
+humanbattlefield=Island;Island;Island;Island;Island;Swamp;Swamp
+humanlibrary=Counterspell;Brainstorm;Tarmogoyf;Thoughtseize;Lightning Bolt;Snapcaster Mage;Ponder;Force of Will;Dark Ritual;Swamp
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

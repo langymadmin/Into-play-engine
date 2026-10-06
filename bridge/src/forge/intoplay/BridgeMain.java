@@ -162,6 +162,44 @@ public final class BridgeMain {
                         return super.chooseStartingPlayer(isFirstGame);
                     }
 
+                    // Two piles: whoever separates, it is one panel on the
+                    // tablet (PilesSheet), not Forge's list of names. When the
+                    // separator is the off-table seat, the person across the
+                    // table does it with the tablet in their hands.
+                    @Override
+                    public forge.game.card.CardCollectionView chooseCardsForEffect(
+                            final forge.game.card.CardCollectionView sourceList, final forge.game.spellability.SpellAbility sa,
+                            final String title, final int min, final int max, final boolean isOptional,
+                            final java.util.Map<String, Object> params) {
+                        BridgeGui gui = current;
+                        if (gui == null || sa == null || sa.getApi() != forge.game.ability.ApiType.TwoPiles) {
+                            return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
+                        }
+                        com.google.gson.JsonArray ids = gui.askPiles("split", p.getName(), sa, sourceList, null,
+                                sa.getParamOrDefault("FaceDown", "False"));
+                        java.util.Set<Integer> want = new java.util.HashSet<>();
+                        ids.forEach(e -> want.add(e.getAsInt()));
+                        forge.game.card.CardCollection pile = new forge.game.card.CardCollection();
+                        for (forge.game.card.Card c : sourceList) {
+                            if (want.contains(c.getId())) {
+                                pile.add(c);
+                            }
+                        }
+                        return pile;
+                    }
+
+                    @Override
+                    public boolean chooseCardsPile(final forge.game.spellability.SpellAbility sa,
+                                                   final forge.game.card.CardCollectionView pile1,
+                                                   final forge.game.card.CardCollectionView pile2, final String faceUp) {
+                        BridgeGui gui = current;
+                        if (gui == null) {
+                            return super.chooseCardsPile(sa, pile1, pile2, faceUp);
+                        }
+                        com.google.gson.JsonArray a = gui.askPiles("choose", p.getName(), sa, pile1, pile2, faceUp);
+                        return a.size() == 0 || a.get(0).getAsInt() != 2;
+                    }
+
                     // The off-table seat's blocks are cardboard, declared on the
                     // tablet just before this runs (CardboardBlocks). Forge's own
                     // InputBlock would ask that seat again, about stand-ins it
