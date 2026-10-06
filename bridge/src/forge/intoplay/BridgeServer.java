@@ -96,7 +96,7 @@ public final class BridgeServer {
 
     /** Messages that drive Forge's input, and so may end up waiting on a question. */
     private static final java.util.Set<String> ON_INPUT_THREAD =
-            java.util.Set.of("ok", "cancel", "concede", "card", "seat", "offTable");
+            java.util.Set.of("ok", "cancel", "concede", "card", "seat", "offTable", "declare");
 
     /**
      * One thread, so taps reach Forge in the order they were made. Not named
@@ -300,6 +300,11 @@ public final class BridgeServer {
                 // there is no deck to deal from.
                 case "start":
                     begin(g, in);
+                    break;
+                // Something the opponent's cardboard did to our side, enacted
+                // through the engine's own actions. See Declarations.
+                case "declare":
+                    Declarations.apply(BridgeMain.currentGame, g, BridgeMain.SEAT, in);
                     break;
                 // The phase dial, as a message. Each named step is one the
                 // player wants to be woken at; an empty list means all of them.

@@ -194,6 +194,9 @@ public final class BridgeMain {
     /** Our seat. */
     static final String SEAT = "Into Play";
 
+    /** The game being played, for declarations that arrive over the socket. */
+    static volatile Game currentGame;
+
     /**
      * A Forge deck from the list the client sent: {@code [{"name","count"}]}.
      *
@@ -612,6 +615,7 @@ public final class BridgeMain {
         }
         Match match = new Match(rules, registered, "Bridge");
         Game game = new Game(registered, rules, match);
+        currentGame = game;
 
         TrackableCollection<forge.game.player.PlayerView> mine = new TrackableCollection<>();
         for (Player p : game.getPlayers()) {
