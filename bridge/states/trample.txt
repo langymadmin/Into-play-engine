@@ -1,0 +1,16 @@
+# Damage assignment: a 6/6 trampler blocked by their cardboard 2/2 — the
+# engine asks how the 6 is split, with lethal shown and the rest through.
+# Arc Lightning for "divided as you choose".
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Arc Lightning
+humanbattlefield=Colossal Dreadmaw;Mountain;Mountain;Mountain
+humanlibrary=Mountain;Mountain;Mountain;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

@@ -1056,11 +1056,53 @@ public class BridgeGui extends AbstractGuiGame {
     public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers,
                                                      final int damage, final GameEntityView defender,
                                                      final boolean overrideOrder, final boolean maySkip) {
-        // Not asked over the wire yet — combat is a later step. Until then all
-        // damage goes to the first blocker, so a game runs to completion instead
-        // of stopping here. Wrong, but deliberately and visibly wrong.
+        // Several blockers, or trample: how this attacker's damage is split is
+        // the player's decision. Asked over the wire with, per blocker, what is
+        // lethal (toughness less damage already marked), and the defender when
+        // trample lets damage through. Answered as [{id, n}], id 0 for the
+        // defender — Forge's own convention is a null key for the defender.
+        JsonObject o = msg("damage");
+        o.addProperty("attacker", attacker == null ? "" : attacker.getName());
+        o.addProperty("attackerId", attacker == null ? 0 : attacker.getId());
+        o.addProperty("amount", damage);
+        o.addProperty("defender", defender == null ? null : defender.getName());
+        o.addProperty("maySkip", maySkip);
+        JsonArray bl = new JsonArray();
+        for (CardView b : blockers) {
+            JsonObject j = new JsonObject();
+            j.addProperty("id", b.getId());
+            j.addProperty("name", b.getName());
+            int toughness = b.getCurrentState() == null ? 0 : b.getCurrentState().getToughness();
+            j.addProperty("toughness", toughness);
+            j.addProperty("lethal", Math.max(0, toughness - b.getDamage()));
+            bl.add(j);
+        }
+        o.add("blockers", bl);
+        JsonArray a = ask(o);
+
         Map<CardView, Integer> out = new java.util.HashMap<>();
-        if (blockers != null && !blockers.isEmpty()) {
+        for (com.google.gson.JsonElement e : a) {
+            if (!e.isJsonObject()) {
+                continue;
+            }
+            int id = e.getAsJsonObject().get("id").getAsInt();
+            int n = e.getAsJsonObject().get("n").getAsInt();
+            if (n <= 0) {
+                continue;
+            }
+            if (id == 0) {
+                out.put(null, n);
+                continue;
+            }
+            for (CardView b : blockers) {
+                if (b.getId() == id) {
+                    out.put(b, n);
+                }
+            }
+        }
+        if (out.isEmpty() && !blockers.isEmpty()) {
+            // No answer (the client went away): the old behaviour, all to the
+            // first blocker, so the game can still finish.
             out.put(blockers.get(0), damage);
         }
         return out;
@@ -1070,9 +1112,42 @@ public class BridgeGui extends AbstractGuiGame {
     public Map<Object, Integer> assignGenericAmount(final CardView effectSource, final Map<Object, Integer> target,
                                                     final int amount, final boolean atLeastOne,
                                                     final String amountLabel) {
+        // Divide an amount among targets — "4 damage divided as you choose",
+        // a mana combination, a shield split. Asked as {"t":"divide"} with the
+        // targets in order; answered as [{i, n}].
+        java.util.List<Object> keys = new java.util.ArrayList<>(target == null ? java.util.List.of() : target.keySet());
+        JsonObject o = msg("divide");
+        o.addProperty("source", effectSource == null ? "" : effectSource.getName());
+        o.addProperty("amount", amount);
+        o.addProperty("atLeastOne", atLeastOne);
+        o.addProperty("label", amountLabel);
+        JsonArray ts = new JsonArray();
+        for (int i = 0; i < keys.size(); i++) {
+            JsonObject j = new JsonObject();
+            j.addProperty("i", i);
+            Object k = keys.get(i);
+            j.addProperty("label", k instanceof GameEntityView gv ? gv.getName() : String.valueOf(k));
+            if (k instanceof CardView cv) {
+                j.addProperty("cardId", cv.getId());
+            }
+            ts.add(j);
+        }
+        o.add("targets", ts);
+        JsonArray a = ask(o);
+
         Map<Object, Integer> out = new java.util.HashMap<>();
-        if (target != null && !target.isEmpty()) {
-            out.put(target.keySet().iterator().next(), amount);
+        for (com.google.gson.JsonElement e : a) {
+            if (!e.isJsonObject()) {
+                continue;
+            }
+            int i = e.getAsJsonObject().get("i").getAsInt();
+            int n = e.getAsJsonObject().get("n").getAsInt();
+            if (i >= 0 && i < keys.size() && n > 0) {
+                out.put(keys.get(i), n);
+            }
+        }
+        if (out.isEmpty() && !keys.isEmpty()) {
+            out.put(keys.get(0), amount);
         }
         return out;
     }
