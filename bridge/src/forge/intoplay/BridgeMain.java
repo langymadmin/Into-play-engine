@@ -180,7 +180,9 @@ public final class BridgeMain {
                         // one deciding (MulliganService passes firstPlayer).
                         // Whose hand this is comes from the controller's own
                         // seat, p.
-                        if (first != null && OFF_TABLE.equals(p.getName())) {
+                        // Phantom's hand is placeholders: it always keeps,
+                        // test positions included.
+                        if (OFF_TABLE.equals(p.getName())) {
                             return true;
                         }
                         return super.mulliganKeepHand(startsGame, cardsToReturn);

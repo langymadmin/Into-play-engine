@@ -392,7 +392,13 @@ public final class BridgeServer {
         @Override
         public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
             System.out.println("socket error: " + cause);
-            ctx.close();
+            // A message that failed is not a dead connection: closing here left
+            // the screen on "Connecting…" for good. Only a real I/O error closes.
+            if (cause instanceof java.io.IOException) {
+                ctx.close();
+            } else {
+                cause.printStackTrace(System.out);
+            }
         }
     }
 }

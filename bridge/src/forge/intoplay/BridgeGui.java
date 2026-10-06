@@ -320,10 +320,11 @@ public class BridgeGui extends AbstractGuiGame {
      * correctly not found. The cost is a scan of a tabletop, which is nothing.
      */
     public CardView card(final int id) {
-        if (getGameView() == null || getGameView().getPlayers() == null) {
+        final forge.game.GameView gv = getGameView();
+        if (gv == null || gv.getPlayers() == null) {
             return null;
         }
-        for (PlayerView p : getGameView().getPlayers()) {
+        for (PlayerView p : gv.getPlayers()) {
             for (ZoneType z : LOOKUP_ZONES) {
                 Iterable<CardView> in = p.getCards(z);
                 if (in == null) {
@@ -341,10 +342,11 @@ public class BridgeGui extends AbstractGuiGame {
 
     /** The seat the client named, by name, or null. */
     public PlayerView player(final String name) {
-        if (name == null || getGameView() == null || getGameView().getPlayers() == null) {
+        final forge.game.GameView gv = getGameView();
+        if (name == null || gv == null || gv.getPlayers() == null) {
             return null;
         }
-        for (PlayerView p : getGameView().getPlayers()) {
+        for (PlayerView p : gv.getPlayers()) {
             if (name.equals(p.getName())) {
                 return p;
             }
@@ -371,12 +373,13 @@ public class BridgeGui extends AbstractGuiGame {
      * here — one socket, one seat, everything visible.
      */
     public void sendBoard() {
-        if (getGameView() == null || getGameView().getPlayers() == null) {
+        final forge.game.GameView gv = getGameView();
+        if (gv == null || gv.getPlayers() == null) {
             return;
         }
         JsonObject o = msg("board");
         JsonArray seats = new JsonArray();
-        for (PlayerView p : getGameView().getPlayers()) {
+        for (PlayerView p : gv.getPlayers()) {
             JsonObject s = new JsonObject();
             s.addProperty("name", p.getName());
             s.addProperty("life", p.getLife());
@@ -420,7 +423,7 @@ public class BridgeGui extends AbstractGuiGame {
             // Commander damage this seat has taken, by commander. Twenty-one
             // from one commander loses the game, and the engine applies that.
             JsonArray dmg = new JsonArray();
-            for (PlayerView other : getGameView().getPlayers()) {
+            for (PlayerView other : gv.getPlayers()) {
                 java.util.List<CardView> theirs = other.getCommanders();
                 if (other == p || theirs == null) {
                     continue;
@@ -447,8 +450,8 @@ public class BridgeGui extends AbstractGuiGame {
         // here. Each item is a spell or an ability; a triggered ability has a
         // source card but is not that card, which is why "text" is sent too.
         JsonArray stack = new JsonArray();
-        if (getGameView().getStack() != null) {
-            for (forge.game.spellability.StackItemView si : getGameView().getStack()) {
+        if (gv.getStack() != null) {
+            for (forge.game.spellability.StackItemView si : gv.getStack()) {
                 CardView src = si.getSourceCard();
                 JsonObject j = new JsonObject();
                 j.addProperty("id", src == null ? 0 : src.getId());
@@ -472,9 +475,9 @@ public class BridgeGui extends AbstractGuiGame {
             o.addProperty("dayTime", game.isDay() ? "day" : "night");
         }
         o.addProperty("offTable", offTableSeat);
-        PlayerView turn = getGameView().getPlayerTurn();
+        PlayerView turn = gv.getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
-        o.addProperty("turn", getGameView().getTurn());
+        o.addProperty("turn", gv.getTurn());
         send(o);
     }
 
@@ -570,6 +573,11 @@ public class BridgeGui extends AbstractGuiGame {
             // hasSickness() alone is true for cards that could never attack.
             j.addProperty("sick", c.isSick());
             j.addProperty("damage", c.getDamage());
+            // Auras and equipment: what they are on, so the board can draw them
+            // behind it, as Forge's own PlayArea does.
+            if (c.getAttachedTo() != null) {
+                j.addProperty("attachedTo", c.getAttachedTo().getId());
+            }
         }
 
         com.google.common.collect.Multiset<forge.game.card.CounterType> ctrs = c.getCounters();

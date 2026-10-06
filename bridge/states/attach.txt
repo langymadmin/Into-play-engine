@@ -1,0 +1,15 @@
+# Attachments drawn behind their card: equip Bonesplitter, cast Rancor and
+# Animate Dead (on the Bolt-killed bear in our graveyard).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Rancor;Animate Dead
+humanbattlefield=Mountain;Swamp;Swamp;Forest;Forest;Grizzly Bears;Bonesplitter
+humanlibrary=Swamp;Swamp;Swamp;Swamp
+humangraveyard=Craw Wurm
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
