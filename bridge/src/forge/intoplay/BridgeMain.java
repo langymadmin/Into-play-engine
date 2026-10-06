@@ -624,6 +624,12 @@ public final class BridgeMain {
             // proxy ends up wrapping the event path as well as the question
             // path, and the priority input never releases its latch.
             human.setGui(gui);
+            // Forge only reports what is playable right now (setWeaklySelectable)
+            // when its desktop "show actionable highlights" preference is on, and
+            // a headless engine has no preferences file — so nothing was ever
+            // sent. The board's green glow is that report.
+            human.getYieldController().setPref(
+                    forge.localinstance.properties.ForgePreferences.FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
             // Twice, and in this order: the first clears whatever view the gui
             // held from a previous game so the second does not copy into stale
             // state. Forge does the same and the comment there says why.

@@ -1312,6 +1312,34 @@ public class BridgeGui extends AbstractGuiGame {
         }
     }
 
+    /**
+     * What the player could do something with right now: the cards Forge
+     * would light up on its own desktop — castable spells, playable lands,
+     * activatable permanents, legal attackers or blockers. The client glows
+     * them, so "what can I do?" is answered by the table, not by trying.
+     */
+    @Override
+    public void setWeaklySelectable(final Iterable<CardView> cards) {
+        super.setWeaklySelectable(cards);
+        JsonObject o = msg("playable");
+        JsonArray ids = new JsonArray();
+        if (cards != null) {
+            for (CardView c : cards) {
+                ids.add(c.getId());
+            }
+        }
+        o.add("ids", ids);
+        send(o);
+    }
+
+    @Override
+    public void clearWeaklySelectable() {
+        super.clearWeaklySelectable();
+        JsonObject o = msg("playable");
+        o.add("ids", new JsonArray());
+        send(o);
+    }
+
     @Override
     public void setHighlighted(final Iterable<GameEntityView> entities, final boolean b) {
         JsonObject o = msg("highlight");
