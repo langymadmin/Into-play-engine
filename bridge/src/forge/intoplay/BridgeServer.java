@@ -20,7 +20,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 
 import forge.interfaces.IGameController;
 
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 
 /**
  * A WebSocket the client half of Into Play talks to.
@@ -58,6 +59,10 @@ import java.util.function.Consumer;
  *   {"t":"card","cardId":42}        tap a card: discard it, play it, cast it
  *   {"t":"seat","name":"…"}         tap a player
  *   {"t":"board"}                   send the table again
+ *   {"t":"start","deck":[{"name":"…","count":4}],"first":"me|them|toss"}
+ *                                   deal a game from this deck
+ *   {"t":"start","deck":[{"name":"…","count":4}],"first":"me|them|toss"}
+ *                                   deal a game from this deck
  *   {"t":"stops","steps":["UPKEEP","MAIN1"]}  wake me only at these steps
  *   {"t":"concede"}
  * </pre>
@@ -81,7 +86,10 @@ import java.util.function.Consumer;
 public final class BridgeServer {
 
     private final int port;
-    private final Consumer<BridgeGui> onReady;
+    private final BiConsumer<BridgeGui, JsonObject> onReady;
+    private final boolean startOnConnect;
+    /** Whether this connection's game has begun, so a second start is ignored. */
+    private final AtomicBoolean started = new AtomicBoolean();
     private EventLoopGroup boss, work;
     private volatile Channel client;
     private volatile BridgeGui gui;
@@ -106,9 +114,23 @@ public final class BridgeServer {
      * @param onReady run once a client connects, with the gui it should drive.
      *                This is where a game gets started.
      */
-    public BridgeServer(final int port0, final Consumer<BridgeGui> onReady0) {
+    public BridgeServer(final int port0, final BiConsumer<BridgeGui, JsonObject> onReady0,
+                        final boolean startOnConnect0) {
         port = port0;
         onReady = onReady0;
+        startOnConnect = startOnConnect0;
+    }
+
+    /**
+     * Begin this connection's game, once. On Forge's own pool, not a thread of
+     * ours — see the handshake below for why that is not a detail.
+     */
+    private void begin(final BridgeGui g, final JsonObject setup) {
+        if (!started.compareAndSet(false, true)) {
+            System.out.println("a game is already running on this connection");
+            return;
+        }
+        forge.util.ThreadUtil.invokeInGameThread(() -> onReady.accept(g, setup));
     }
 
     public BridgeGui gui() {
@@ -171,7 +193,10 @@ public final class BridgeServer {
                 // waiting for a latch that the mana ability, now executing on
                 // an unrelated pool thread, never got far enough to release.
                 // No exception, no log line, just a game that stops.
-                forge.util.ThreadUtil.invokeInGameThread(() -> onReady.accept(gui));
+                started.set(false);
+                if (startOnConnect) {
+                    begin(gui, null);
+                }
             }
             super.userEventTriggered(ctx, evt);
         }
@@ -269,6 +294,12 @@ public final class BridgeServer {
                 }
                 case "board":
                     g.sendBoard();
+                    break;
+                // The player's deck and who goes first. The game waits for this
+                // rather than starting on connect, because until it arrives
+                // there is no deck to deal from.
+                case "start":
+                    begin(g, in);
                     break;
                 // The phase dial, as a message. Each named step is one the
                 // player wants to be woken at; an empty list means all of them.

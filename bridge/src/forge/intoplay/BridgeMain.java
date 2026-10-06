@@ -124,14 +124,114 @@ public final class BridgeMain {
      * Same controller wiring without that lookup.
      */
     static LobbyPlayerHuman lobbyPlayer(final String name) {
+        return lobbyPlayer(name, null);
+    }
+
+    /**
+     * The same, with the two decisions a kitchen table makes for itself.
+     *
+     * <p><b>Who goes first.</b> Forge flips a coin and asks the winner to play
+     * or draw. At a real table people decide that a dozen ways — a die roll,
+     * whoever lost last, "you go" — and the app has no business insisting on
+     * its own. So when the player has already said, {@code chooseStartingPlayer}
+     * answers with that seat and nobody is asked. Forge's own hook, overridden
+     * on the bridge's own controller; nothing in Forge is patched.
+     *
+     * <p><b>The off-table seat's mulligan.</b> Its hand exists only in the
+     * engine — the real one is cardboard across the table, and its mulligans
+     * happen there. Asking the tablet to keep or mulligan a hand nobody can see
+     * is a question with no meaning, so that seat always keeps.
+     */
+    static LobbyPlayerHuman lobbyPlayer(final String name, final String first) {
         return new LobbyPlayerHuman(name) {
             @Override
             public Player createIngamePlayer(final Game game, final int id) {
                 Player p = new Player(getName(), game, id);
-                p.setFirstController(new PlayerControllerHuman(game, p, this));
+                p.setFirstController(new PlayerControllerHuman(game, p, this) {
+                    @Override
+                    public Player chooseStartingPlayer(final boolean isFirstGame) {
+                        String seat = "me".equals(first) ? SEAT
+                                : "them".equals(first) ? OFF_TABLE : null;
+                        if (seat != null) {
+                            for (Player candidate : game.getPlayers()) {
+                                if (seat.equals(candidate.getName())) {
+                                    return candidate;
+                                }
+                            }
+                        }
+                        return super.chooseStartingPlayer(isFirstGame);
+                    }
+
+                    @Override
+                    public boolean mulliganKeepHand(final Player startsGame, final int cardsToReturn) {
+                        // The argument is the player who goes FIRST, not the
+                        // one deciding (MulliganService passes firstPlayer).
+                        // Whose hand this is comes from the controller's own
+                        // seat, p.
+                        if (first != null && OFF_TABLE.equals(p.getName())) {
+                            return true;
+                        }
+                        return super.mulliganKeepHand(startsGame, cardsToReturn);
+                    }
+                });
                 return p;
             }
         };
+    }
+
+    /** Our seat. */
+    static final String SEAT = "Into Play";
+
+    /**
+     * A Forge deck from the list the client sent: {@code [{"name","count"}]}.
+     *
+     * <p>Names come from Moxfield, Archidekt or a pasted list, so they are
+     * printed names, and a double-faced card may arrive as "Front // Back".
+     * Forge files those under the front face, so that is tried second.
+     * Anything still not found is reported rather than dropped in silence.
+     */
+    static Deck deckFrom(final com.google.gson.JsonObject setup, final BridgeGui gui) {
+        CardDb db = StaticData.instance().getCommonCards();
+        String name = setup.has("deckName") ? setup.get("deckName").getAsString() : SEAT;
+        Deck d = new Deck(name);
+        List<String> missing = new ArrayList<>();
+        int total = 0;
+        for (com.google.gson.JsonElement e : setup.getAsJsonArray("deck")) {
+            com.google.gson.JsonObject entry = e.getAsJsonObject();
+            String card = entry.get("name").getAsString().trim();
+            int n = entry.has("count") ? entry.get("count").getAsInt() : 1;
+            PaperCard pc = db.getCard(card);
+            if (pc == null && card.contains("//")) {
+                pc = db.getCard(card.substring(0, card.indexOf("//")).trim());
+            }
+            if (pc == null) {
+                missing.add(card);
+                continue;
+            }
+            d.getMain().add(pc, n);
+            total += n;
+        }
+        gui.sendDeckReport(name, total, missing);
+        System.out.println("deck: " + name + ", " + total + " cards"
+                + (missing.isEmpty() ? "" : ", not found: " + missing));
+        return d;
+    }
+
+    /**
+     * The off-table seat's library, which nobody will ever see.
+     *
+     * <p>It has to exist: the opening hand is dealt from it before the seal can
+     * stop draws, and a seat that drew from an empty library on the way in
+     * would be a loss the room never saw coming. Basic lands, because they do
+     * nothing, and the client shows that seat's hand only as a count.
+     */
+    static Deck placeholderDeck() {
+        Deck d = new Deck(OFF_TABLE);
+        PaperCard wastes = StaticData.instance().getCommonCards().getCard("Wastes");
+        if (wastes != null) {
+            d.getMain().add(wastes, 60);
+        }
+        return d;
     }
 
     public static void main(final String[] args) throws Exception {
@@ -149,14 +249,18 @@ public final class BridgeMain {
         Localizer.getInstance().initialize("en-US", res + "/languages/");
         loadCards(res);
 
-        BridgeServer server = new BridgeServer(port, gui -> {
+        // With a scenario file the game starts the moment a client connects, as
+        // it always has — that is what the test clients expect. Without one it
+        // waits for {"t":"start"}, which carries the player's own deck.
+        final boolean startOnConnect = state != null && !state.isBlank();
+        BridgeServer server = new BridgeServer(port, (gui, setup) -> {
             try {
-                runGame(res, gui, state);
+                runGame(res, gui, state, setup);
             } catch (Throwable t) {
                 System.out.println("[game ended] " + t);
                 t.printStackTrace(System.out);
             }
-        });
+        }, startOnConnect);
         server.start();
 
         // The process stays up for the socket; the game lives on its own thread.
@@ -433,12 +537,24 @@ public final class BridgeMain {
         }
     }
 
-    static void runGame(final String res, final BridgeGui gui, final String statePath) {
+    /**
+     * @param setup the client's {@code {"t":"start"}}: its deck and who goes
+     *              first. Null when a scenario file started the game on
+     *              connect, which keeps the old test clients working unchanged.
+     */
+    static void runGame(final String res, final BridgeGui gui, final String statePath,
+                        final com.google.gson.JsonObject setup) {
         current = gui;
 
+        final boolean ownDeck = setup != null && setup.has("deck") && setup.get("deck").isJsonArray();
+        // "me", "them", or anything else for Forge's own coin toss.
+        final String first = setup != null && setup.has("first") ? setup.get("first").getAsString() : null;
+
         List<RegisteredPlayer> registered = new ArrayList<>();
-        registered.add(new RegisteredPlayer(redDeck("Into Play")).setPlayer(lobbyPlayer("Into Play")));
-        registered.add(new RegisteredPlayer(redDeck("Phantom")).setPlayer(lobbyPlayer("Phantom")));
+        registered.add(new RegisteredPlayer(ownDeck ? deckFrom(setup, gui) : redDeck(SEAT))
+                .setPlayer(lobbyPlayer(SEAT, first)));
+        registered.add(new RegisteredPlayer(ownDeck ? placeholderDeck() : redDeck(OFF_TABLE))
+                .setPlayer(lobbyPlayer(OFF_TABLE, first)));
 
         GameRules rules = new GameRules(GameType.Constructed);
         Match match = new Match(rules, registered, "Bridge");
@@ -471,9 +587,12 @@ public final class BridgeMain {
             // event stream becomes Into Play's log written by the thing that
             // knows rather than by the client guessing after each tap.
             game.subscribeToEvents(new FControlGameEventHandler(human));
-            game.subscribeToEvents(new forge.gui.control.GameEventForwarder(gui));
             mine.add(p.getView());
         }
+        // Once, not once per seat. Both seats share this gui, and subscribing
+        // the forwarder inside the loop above sent every event to the client
+        // twice — the whole log, doubled, for as long as the bridge existed.
+        game.subscribeToEvents(new forge.gui.control.GameEventForwarder(gui));
         // Before openView, so the first message the client sees already names
         // the proxy seat.
         gui.setOffTableSeat(OFF_TABLE);

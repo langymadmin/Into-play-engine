@@ -164,6 +164,24 @@ public class BridgeGui extends AbstractGuiGame {
         }
     }
 
+    /**
+     * What became of the deck the client sent: how many cards made it into
+     * the library, and every name Forge could not find. Sent before the game
+     * starts, so a typo is reported where the player can fix it rather than
+     * discovered as a missing card on turn six.
+     */
+    public void sendDeckReport(final String deckName, final int cards, final java.util.List<String> missing) {
+        JsonObject o = msg("deck");
+        o.addProperty("name", deckName);
+        o.addProperty("cards", cards);
+        JsonArray m = new JsonArray();
+        for (String s : missing) {
+            m.add(s);
+        }
+        o.add("missing", m);
+        send(o);
+    }
+
     private static JsonObject msg(final String type) {
         JsonObject o = new JsonObject();
         o.addProperty("t", type);
