@@ -592,7 +592,20 @@ public final class BridgeMain {
         // Once, not once per seat. Both seats share this gui, and subscribing
         // the forwarder inside the loop above sent every event to the client
         // twice — the whole log, doubled, for as long as the bridge existed.
-        game.subscribeToEvents(new forge.gui.control.GameEventForwarder(gui));
+        forge.gui.control.GameEventForwarder forwarder = new forge.gui.control.GameEventForwarder(gui);
+        game.subscribeToEvents(forwarder);
+        // And it must watch each seat's input queue. The forwarder buffers
+        // events and sends them in batches; its last flush is meant to happen
+        // when the engine stops to wait for a player — which it only hears
+        // about as an observer of the InputQueue. Without this, whatever
+        // happened just before a prompt (the step changing, a land landing)
+        // sat in the buffer until the next event came along, so the screen
+        // was always one step behind and showed no phase at all.
+        for (Player p : game.getPlayers()) {
+            if (p.getController() instanceof PlayerControllerHuman human) {
+                human.getInputQueue().addObserver(forwarder);
+            }
+        }
         // Before openView, so the first message the client sees already names
         // the proxy seat.
         gui.setOffTableSeat(OFF_TABLE);
