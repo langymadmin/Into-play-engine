@@ -1,0 +1,16 @@
+# Player state shown as 2.5's signposts: poison and energy from counters,
+# the monarch from Palace Jailer, day from Brutal Cathar (daybound).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humancounters=POISON=3,ENERGY=4
+humanhand=Palace Jailer;Brutal Cathar
+humanbattlefield=Plains;Plains;Plains;Plains;Plains;Plains;Plains
+humanlibrary=Plains;Plains;Plains;Plains;Plains
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

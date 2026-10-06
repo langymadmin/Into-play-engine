@@ -401,6 +401,7 @@ public class BridgeGui extends AbstractGuiGame {
             if (dmg.size() > 0) {
                 s.add("commanderDamage", dmg);
             }
+            playerState(s, p.getName());
             seats.add(s);
         }
         o.add("seats", seats);
@@ -426,11 +427,65 @@ public class BridgeGui extends AbstractGuiGame {
             }
         }
         o.add("stack", stack);
+        forge.game.Game game = BridgeMain.currentGame;
+        if (game != null && game.getDayTime() != null) {
+            o.addProperty("dayTime", game.isDay() ? "day" : "night");
+        }
         o.addProperty("offTable", offTableSeat);
         PlayerView turn = getGameView().getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
         o.addProperty("turn", getGameView().getTurn());
         send(o);
+    }
+
+    /**
+     * What a player has that is not a card: floating mana, poison and other
+     * player counters (energy, experience, rad), the monarch, the initiative,
+     * the city's blessing. Read from the live game — PlayerView does not carry
+     * them — and drawn by the panels the app already has for each.
+     */
+    private void playerState(final JsonObject s, final String name) {
+        forge.game.Game game = BridgeMain.currentGame;
+        if (game == null) {
+            return;
+        }
+        forge.game.player.Player p = null;
+        for (forge.game.player.Player x : game.getPlayers()) {
+            if (name.equals(x.getName())) {
+                p = x;
+            }
+        }
+        if (p == null) {
+            return;
+        }
+        forge.game.mana.ManaPool pool = p.getManaPool();
+        if (pool != null && pool.totalMana() > 0) {
+            JsonObject m = new JsonObject();
+            m.addProperty("W", pool.getAmountOfColor(forge.card.MagicColor.WHITE));
+            m.addProperty("U", pool.getAmountOfColor(forge.card.MagicColor.BLUE));
+            m.addProperty("B", pool.getAmountOfColor(forge.card.MagicColor.BLACK));
+            m.addProperty("R", pool.getAmountOfColor(forge.card.MagicColor.RED));
+            m.addProperty("G", pool.getAmountOfColor(forge.card.MagicColor.GREEN));
+            m.addProperty("C", pool.getAmountOfColor(forge.card.MagicColor.COLORLESS));
+            s.add("mana", m);
+        }
+        com.google.common.collect.Multiset<forge.game.card.CounterType> ctrs = p.getCounters();
+        if (ctrs != null && !ctrs.isEmpty()) {
+            JsonObject c = new JsonObject();
+            for (forge.game.card.CounterType t : ctrs.elementSet()) {
+                c.addProperty(t.getName(), ctrs.count(t));
+            }
+            s.add("playerCounters", c);
+        }
+        if (game.getMonarch() == p) {
+            s.addProperty("monarch", true);
+        }
+        if (game.getHasInitiative() == p) {
+            s.addProperty("initiative", true);
+        }
+        if (p.hasBlessing()) {
+            s.addProperty("blessing", true);
+        }
     }
 
     /**
