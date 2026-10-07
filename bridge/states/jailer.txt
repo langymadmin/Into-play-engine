@@ -1,0 +1,16 @@
+# Their side acting on ours: Palace Jailer entering now (it exiles one of
+# ours, they choose), Control Magic aimed at their REAL Thragtusk, and
+# "they took control" of Llanowar Elves, given back from Their table.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Control Magic
+humanbattlefield=Island;Island;Island;Island;Grizzly Bears;Llanowar Elves
+humanlibrary=Island;Island;Island;Island
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

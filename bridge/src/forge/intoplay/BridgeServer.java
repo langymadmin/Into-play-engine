@@ -425,6 +425,7 @@ public final class BridgeServer {
                             BridgeMain.currentForwarder.flush();
                         }
                         g.sendBoard();
+                        g.reshowPrompts();
                     });
                     break;
                 }
@@ -455,6 +456,7 @@ public final class BridgeServer {
                             BridgeMain.currentForwarder.flush();
                         }
                         g.sendBoard();
+                        g.reshowPrompts();
                     });
                     break;
                 }
@@ -499,6 +501,47 @@ public final class BridgeServer {
                     }
                     String described = in.has("describe")
                             ? in.get("describe").getAsString() : null;
+                    // Their REAL card (Control Magic, Clone, Hostage Taker): it
+                    // is put on their side first, quietly — it is already in
+                    // play at the table — and then aimed at like any card,
+                    // so what the spell does to it is real. On the game's
+                    // pool, then back here to select it.
+                    if (in.has("real") && in.get("real").getAsBoolean() && described != null
+                            && TheirSide.current != null && BridgeMain.currentGame != null) {
+                        final String seatName = in.has("seat") ? in.get("seat").getAsString() : null;
+                        final IGameController ctl = c;
+                        BridgeMain.currentGame.getAction().invoke(() -> {
+                            forge.game.card.Card real = TheirSide.current.putOnBattlefieldFor(described, false, seatName);
+                            if (real == null) {
+                                g.tell(java.util.List.of("The engine doesn't know a card called \"" + described + "\"."));
+                                return;
+                            }
+                            // The input fixed its candidates when targeting began,
+                            // before this card existed. Added to that list — read
+                            // and written by reflection, not patched — if the
+                            // spell could really target it.
+                            try {
+                                java.lang.reflect.Field sf = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("sa");
+                                sf.setAccessible(true);
+                                forge.game.spellability.SpellAbility tsa = (forge.game.spellability.SpellAbility) sf.get(targeting);
+                                java.lang.reflect.Field cf = forge.gamemodes.match.input.InputSelectTargets.class.getDeclaredField("choices");
+                                cf.setAccessible(true);
+                                @SuppressWarnings("unchecked")
+                                java.util.List<forge.game.card.Card> choices = (java.util.List<forge.game.card.Card>) cf.get(targeting);
+                                if (tsa != null && tsa.canTarget(real) && !choices.contains(real)) {
+                                    // A copy: the list handed in may be read-only.
+                                    java.util.List<forge.game.card.Card> more = new java.util.ArrayList<>(choices);
+                                    more.add(real);
+                                    cf.set(targeting, more);
+                                }
+                            } catch (ReflectiveOperationException | RuntimeException e) {
+                                System.out.println("could not add the real card to the choices: " + e);
+                            }
+                            g.sendBoard();
+                            INPUT.execute(() -> ctl.selectCard(forge.game.card.CardView.get(real), null, null));
+                        });
+                        break;
+                    }
                     String effect = targeting.selectOffTable(described);
                     if (effect == null) {
                         // A restriction even a phantom cannot satisfy. Say so

@@ -548,6 +548,14 @@ public class BridgeGui extends AbstractGuiGame {
         o.add("stack", stack);
         if (TheirSide.current != null) {
             o.add("table", TheirSide.current.describe());
+            // Each opponent's own, when there are several.
+            if (BridgeMain.OPPONENTS.size() > 1) {
+                JsonObject tables = new JsonObject();
+                for (String seatName : BridgeMain.OPPONENTS) {
+                    tables.add(seatName, TheirSide.current.describe(seatName));
+                }
+                o.add("tables", tables);
+            }
         }
         forge.game.Game game = BridgeMain.currentGame;
         if (game != null && game.getDayTime() != null) {
@@ -1021,6 +1029,32 @@ public class BridgeGui extends AbstractGuiGame {
     /** The steps the client has asked to be woken at; empty means all of them. */
     private final java.util.Set<PhaseType> stops =
             java.util.EnumSet.noneOf(PhaseType.class);
+
+    /**
+     * Say again what each seat is being asked. Work done beside the game's
+     * own flow — a declaration, a card of theirs entering, a take-back —
+     * can change what the waiting input is about (the stack has two Jailer
+     * triggers now), but the input never re-announces itself: the screen
+     * would keep the last prompt it heard, which is no longer true.
+     */
+    public void reshowPrompts() {
+        if (getLocalPlayers() == null) {
+            return;
+        }
+        for (PlayerView p : getLocalPlayers()) {
+            IGameController c = controllerFor(p.getName());
+            if (c instanceof forge.player.PlayerControllerHuman h) {
+                forge.gamemodes.match.input.Input in = h.getInputQueue().getInput();
+                if (in != null) {
+                    try {
+                        in.showMessageInitial();
+                    } catch (RuntimeException e) {
+                        System.out.println("reshow " + p.getName() + ": " + e);
+                    }
+                }
+            }
+        }
+    }
 
     /** A new game keeps the stops the screen set for the last one. */
     public void inheritStops(final BridgeGui old) {

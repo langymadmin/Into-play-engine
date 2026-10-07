@@ -69,9 +69,16 @@ import java.util.Set;
         current = this;
     }
 
+    /**
+     * Which opponent a change is about. The first by default; with several
+     * opponents the panel says whose table it is editing ("seat").
+     */
+    private volatile String focus;
+
     private Player them() {
+        String name = focus != null ? focus : offTable;
         for (Player p : game.getPlayers()) {
-            if (offTable.equals(p.getName())) {
+            if (name.equals(p.getName())) {
                 return p;
             }
         }
@@ -151,12 +158,37 @@ import java.util.Set;
      * table" and on the "Their table…" button.
      */
     Card putOnBattlefield(final String name) {
+        return putOnBattlefield(name, false);
+    }
+
+    /**
+     * @param enters true when it enters NOW, at the table (Palace Jailer, a
+     *               Thragtusk just cast): it moves onto the battlefield the
+     *               engine's way, so its "when this enters" triggers — and
+     *               ours, for "whenever a creature enters under an
+     *               opponent's control" — run. Their choices (Palace
+     *               Jailer's target) are asked of their seat, answered on
+     *               the tablet for them.
+     */
+    Card putOnBattlefield(final String name, final boolean enters) {
         Player them = them();
         PaperCard pc = paper(name);
         if (them == null || pc == null) {
             return null;
         }
         Card c = CardFactory.getCard(pc, them, game);
+        if (enters) {
+            // As Forge's own dev-mode "add card to battlefield" does it: a card
+            // has to come FROM somewhere for "when this enters" to see it enter,
+            // so it goes to their hand first, then into play, then the waiting
+            // triggers are run.
+            game.getAction().moveToHand(c, null);
+            Card moved = game.getAction().moveToPlay(c, null, null);
+            game.getTriggerHandler().runWaitingTriggers();
+            game.getAction().checkStateEffects(true);
+            game.getStack().addAllTriggeredAbilitiesToStack();
+            return moved;
+        }
         c.setSickness(false);
         c.setGameTimestamp(game.getNextTimestamp());
         them.getZone(ZoneType.Battlefield).add(c);
@@ -172,10 +204,72 @@ import java.util.Set;
         }
         for (Card c : new ArrayList<>(them.getCardsIn(ZoneType.Battlefield))) {
             if (c.getId() == cardId && !creatureMarks.contains(c)) {
-                them.getZone(ZoneType.Battlefield).remove(c);
+                if (c.getOwner() != them) {
+                    // One of OURS they had taken: it comes back, not away.
+                    giveBack(c);
+                } else {
+                    them.getZone(ZoneType.Battlefield).remove(c);
+                }
             }
         }
         game.getAction().checkStaticAbilities();
+    }
+
+    // ------------------------------------------------------------------
+    // They took one of ours
+    // ------------------------------------------------------------------
+
+    /** Our permanents they control, and the timestamp of each change. */
+    private static final java.util.Map<Integer, Long> taken = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Their Threads of Disloyalty, Act of Treason, Control Magic on one of
+     * ours: the real card changes control, as Forge's own gain-control effect
+     * does it — so it leaves our board, our "whenever a creature you control"
+     * stops seeing it, and their side has it (listed in "Their table").
+     */
+    void take(final Card c) {
+        Player them = them();
+        if (them == null || c == null) {
+            return;
+        }
+        long ts = game.getNextTimestamp();
+        c.addTempController(them, ts);
+        taken.put(c.getId(), ts);
+        game.getAction().controllerChangeZoneCorrection(c);
+    }
+
+    /** {@link #take} for a named opponent (null: the first). */
+    void takeFor(final Card c, final String seatName) {
+        String was = focus;
+        focus = seatName != null && BridgeMain.isOffTable(seatName) ? seatName : null;
+        try {
+            take(c);
+        } finally {
+            focus = was;
+        }
+    }
+
+    /** {@link #putOnBattlefield} for a named opponent (null: the first). */
+    Card putOnBattlefieldFor(final String name, final boolean enters, final String seatName) {
+        String was = focus;
+        focus = seatName != null && BridgeMain.isOffTable(seatName) ? seatName : null;
+        try {
+            return putOnBattlefield(name, enters);
+        } finally {
+            focus = was;
+        }
+    }
+
+    /** It comes back (their aura left, end of turn for Act of Treason). */
+    void giveBack(final Card c) {
+        Long ts = taken.remove(c.getId());
+        if (ts != null) {
+            c.removeTempController(ts);
+        } else {
+            c.clearTempControllers();
+        }
+        game.getAction().controllerChangeZoneCorrection(c);
     }
 
     private static PaperCard paper(final String name) {
@@ -264,6 +358,21 @@ import java.util.Set;
 
     /** The definitions in force, for the board message. */
     JsonObject describe() {
+        return describe(null);
+    }
+
+    /** One opponent's table (null: the first). */
+    JsonObject describe(final String seatName) {
+        String was = focus;
+        focus = seatName;
+        try {
+            return describeFocus();
+        } finally {
+            focus = was;
+        }
+    }
+
+    private JsonObject describeFocus() {
         JsonObject o = new JsonObject();
         JsonArray gt = new JsonArray();
         graveyardTypes.forEach(gt::add);
@@ -298,6 +407,10 @@ import java.util.Set;
                 JsonObject j = new JsonObject();
                 j.addProperty("id", c.getId());
                 j.addProperty("name", c.getName());
+                // Ours, under their control: × gives it back.
+                if (c.getOwner() != them) {
+                    j.addProperty("yours", true);
+                }
                 bf.add(j);
             }
         }
@@ -310,6 +423,16 @@ import java.util.Set;
      * removeFromGraveyard:[id…]} — from the panel, or from the question at cast.
      */
     void apply(final JsonObject in) {
+        String was = focus;
+        focus = in.has("seat") && BridgeMain.isOffTable(in.get("seat").getAsString()) ? in.get("seat").getAsString() : null;
+        try {
+            applyFocus(in);
+        } finally {
+            focus = was;
+        }
+    }
+
+    private void applyFocus(final JsonObject in) {
         if (in.has("removeFromGraveyard")) {
             for (JsonElement e : in.getAsJsonArray("removeFromGraveyard")) {
                 removeFromGraveyard(e.getAsInt());
@@ -326,9 +449,13 @@ import java.util.Set;
             }
         }
         if (in.has("addToBattlefield")) {
+            // A name, or {name, enters} for a card entering now (its triggers run).
             for (JsonElement e : in.getAsJsonArray("addToBattlefield")) {
-                if (putOnBattlefield(e.getAsString()) == null) {
-                    gui.tell(List.of("The engine doesn't know a card called \"" + e.getAsString() + "\"."));
+                String name = e.isJsonObject() ? e.getAsJsonObject().get("name").getAsString() : e.getAsString();
+                boolean enters = e.isJsonObject() && e.getAsJsonObject().has("enters")
+                        && e.getAsJsonObject().get("enters").getAsBoolean();
+                if (putOnBattlefield(name, enters) == null) {
+                    gui.tell(List.of("The engine doesn't know a card called \"" + name + "\"."));
                 }
             }
         }

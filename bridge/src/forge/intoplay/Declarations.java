@@ -180,6 +180,15 @@ final class Declarations {
                     said = card.getName() + (n > 0 ? " got " : " lost ") + Math.abs(n) + " " + type.getName() + " counter(s)";
                     break;
                 }
+                // Their Threads of Disloyalty / Act of Treason / Control Magic:
+                // one of ours changes control (and comes back from "Their
+                // table", where it is then listed). See TheirSide.take.
+                case "take": {
+                    if (card == null || TheirSide.current == null) { return; }
+                    TheirSide.current.takeFor(card, in.has("seat") ? in.get("seat").getAsString() : null);
+                    said = card.getName() + " is theirs now";
+                    break;
+                }
                 // Their Counterspell, Stifle, Mana Leak they paid for: our spell
                 // or ability comes off the stack. `stack` is its place in the
                 // board's stack list (0 = top), `to` where a spell goes —
@@ -267,6 +276,7 @@ final class Declarations {
             // the board is sent at once so the screen does not wait for the
             // next prompt to show it.
             gui.sendBoard();
+            gui.reshowPrompts();
         }
     }
 
