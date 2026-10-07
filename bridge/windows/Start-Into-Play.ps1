@@ -12,7 +12,8 @@
 #   - the app is rebuilt (npm run build) only when its source is newer than
 #     the last build - a quarter of a minute, while the cards load anyway;
 #   - the engine starts hidden, its output in bridge\logs\engine.log. A running
-#     engine keeps its game: clicking again just reopens the screen;
+#     engine keeps its game: clicking again just reopens the screen - unless
+#     the engine has been updated since it started, when it offers to restart;
 #   - then the browser opens the table.
 # Stop-Into-Play.ps1 stops the engine (or end it from Task Manager: "java").
 #
@@ -51,14 +52,39 @@ function ServesApp {
 function Open { if (-not $NoBrowser) { Start-Process $url } }
 
 # --- already running? -------------------------------------------------------
+function EngineProcess {
+    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { return Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue }
+}
+function StopEngine {
+    Get-NetTCPConnection -LocalPort $Port -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+    for ($i = 0; $i -lt 20 -and (Listening $Port); $i++) { Start-Sleep -Milliseconds 300 }
+}
+# The engine's own code (the bridge, and Forge classes patched locally), newest
+# file first: compiled after the running engine started = it is out of date.
+function EngineUpdatedAfter($started) {
+    foreach ($d in (Join-Path $engineRoot "engine\forge\intoplay"), (Join-Path $engineRoot "engine-override")) {
+        if ((Test-Path $d) -and (Get-ChildItem $d -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.LastWriteTime -gt $started } | Select-Object -First 1)) { return $true }
+    }
+    return $false
+}
+
 if (Listening $Port) {
-    if (ServesApp) { Open; exit 0 }
+    if (ServesApp) {
+        $proc = EngineProcess
+        if ($proc -and (EngineUpdatedAfter $proc.StartTime)) {
+            $a = Say "Into Play's engine has been updated since it started. Restart it now to use the new version? The current game ends." "YesNo" "Question"
+            if ($a -eq "Yes") { StopEngine } else { Open; exit 0 }
+        } else { Open; exit 0 }
+    }
+}
+if (Listening $Port) {
     # An engine started the old way (Start-Bridge.ps1): it plays, but has no
     # screen to serve.
     $a = Say "An engine started the old way is running on port $Port. Restart it so it also serves the screen? Its current game ends." "YesNo" "Question"
     if ($a -ne "Yes") { exit 0 }
-    Get-NetTCPConnection -LocalPort $Port -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-    Start-Sleep -Seconds 1
+    StopEngine
 }
 
 # --- java -------------------------------------------------------------------
