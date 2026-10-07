@@ -159,12 +159,19 @@ public class BridgeGui extends AbstractGuiGame {
     // ---------------------------------------------------------------------
 
     private void send(final JsonObject o) {
+        if (retired) {
+            return;
+        }
         String s = o.toString();
         // What a screen joining mid-game needs to catch up: where the game is
         // and what it is waiting for, per seat. The board it asks for itself.
         String t = o.has("t") ? o.get("t").getAsString() : "";
         if ("phase".equals(t) || "turn".equals(t)) {
             latest.put(t, s);
+        } else if ("targeting".equals(t)) {
+            latest.put(t, s);
+        } else if ("targetingDone".equals(t)) {
+            latest.remove("targeting");
         } else if ("prompt".equals(t) || "buttons".equals(t)) {
             String who = o.has("player") && !o.get("player").isJsonNull() ? o.get("player").getAsString() : "";
             latest.put(t + ":" + who, s);
@@ -190,6 +197,12 @@ public class BridgeGui extends AbstractGuiGame {
         }
         latest.forEach((k, v) -> { if (k.startsWith("buttons:")) out.add(v); });
         latest.forEach((k, v) -> { if (k.startsWith("prompt:")) out.add(v); });
+        if (latest.containsKey("targeting")) {
+            out.add(latest.get("targeting"));
+        }
+        // The question the engine is parked on, if any, last: it is what the
+        // screen has to show.
+        new java.util.TreeMap<>(openAsks).values().forEach(out::add);
         return out;
     }
 
@@ -542,6 +555,10 @@ public class BridgeGui extends AbstractGuiGame {
         }
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
+        // How many steps "take that back" can go (see Rewind).
+        if (game != null) {
+            o.addProperty("rewind", Rewind.available(game));
+        }
         PlayerView turn = gv.getPlayerTurn();
         o.addProperty("turnPlayer", turn == null ? null : turn.getName());
         o.addProperty("turn", gv.getTurn());
@@ -983,6 +1000,14 @@ public class BridgeGui extends AbstractGuiGame {
     private final java.util.Set<PhaseType> stops =
             java.util.EnumSet.noneOf(PhaseType.class);
 
+    /** A new game keeps the stops the screen set for the last one. */
+    public void inheritStops(final BridgeGui old) {
+        if (old != null) {
+            stops.clear();
+            stops.addAll(old.stops);
+        }
+    }
+
     /** Replace the stop list. Names are {@link PhaseType} constants. */
     public void setStops(final Iterable<String> names) {
         stops.clear();
@@ -1095,10 +1120,16 @@ public class BridgeGui extends AbstractGuiGame {
      * point.
      */
     private JsonArray ask(final JsonObject body) {
+        if (retired) {
+            return new JsonArray(); // a game being thrown away asks nobody
+        }
         final int id = nextAskId.getAndIncrement();
         body.addProperty("id", id);
         SynchronousQueue<JsonArray> q = new SynchronousQueue<>();
         pending.put(id, q);
+        // Kept until answered, so a screen that reconnects mid-question is
+        // asked again rather than left looking at a game that waits silently.
+        openAsks.put(id, body.toString());
         send(body);
         try {
             return q.take(); // the engine thread parks here
@@ -1107,6 +1138,25 @@ public class BridgeGui extends AbstractGuiGame {
             return new JsonArray();
         } finally {
             pending.remove(id);
+            openAsks.remove(id);
+        }
+    }
+
+    /** Questions sent and not yet answered, by id — see {@link #catchUp}. */
+    private final Map<Integer, String> openAsks = new ConcurrentHashMap<>();
+
+    /** Set when this game is being replaced by a new one: it goes quiet. */
+    private volatile boolean retired;
+
+    /**
+     * Stop speaking for this game: nothing more is sent, nothing more is
+     * asked, and every question it is parked on is answered with nothing so
+     * its thread can run to the end. "New game" without restarting Java.
+     */
+    public void retire() {
+        retired = true;
+        for (SynchronousQueue<JsonArray> q : pending.values()) {
+            q.offer(new JsonArray());
         }
     }
 
@@ -1589,6 +1639,7 @@ public class BridgeGui extends AbstractGuiGame {
         // prompted first means it changes with the coin toss.
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
+        o.add("addresses", lanAddresses());
         lastOpen = o.toString();
         send(o);
     }
@@ -1598,6 +1649,34 @@ public class BridgeGui extends AbstractGuiGame {
 
     public String lastOpen() {
         return lastOpen;
+    }
+
+    /**
+     * This computer's addresses on the local network (a home router, a phone
+     * hotspot), for "pair a phone": the phone has to be told where the engine
+     * is, and "localhost" on the phone is the phone.
+     */
+    static JsonArray lanAddresses() {
+        JsonArray a = new JsonArray();
+        try {
+            for (java.net.NetworkInterface ni : java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback() || ni.isVirtual()) {
+                    continue;
+                }
+                String n = (ni.getDisplayName() + " " + ni.getName()).toLowerCase();
+                if (n.contains("vmware") || n.contains("virtualbox") || n.contains("hyper-v") || n.contains("wsl") || n.contains("vethernet")) {
+                    continue;
+                }
+                for (java.net.InetAddress ad : java.util.Collections.list(ni.getInetAddresses())) {
+                    if (ad instanceof java.net.Inet4Address && !ad.isLinkLocalAddress()) {
+                        a.add(ad.getHostAddress());
+                    }
+                }
+            }
+        } catch (java.net.SocketException e) {
+            System.out.println("no network addresses: " + e);
+        }
+        return a;
     }
 
     /** Every off-table seat, first one first (several in multiplayer). */

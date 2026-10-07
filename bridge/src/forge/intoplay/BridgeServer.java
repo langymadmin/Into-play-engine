@@ -133,6 +133,43 @@ public final class BridgeServer {
         forge.util.ThreadUtil.invokeInGameThread(() -> onReady.accept(g, setup));
     }
 
+    /**
+     * Deal a game — ending the one in progress first, if there is one, in the
+     * same Java process. Cards take half a minute to load; a new game should
+     * not.
+     *
+     * <p>The old game is retired (its gui goes quiet and lets go of any
+     * question it is parked on) and every seat concedes, so its thread runs to
+     * "game over" on its own. The new game gets a fresh gui, so nothing the old
+     * one still says on its way out reaches the screen.
+     */
+    private void newGame(final JsonObject setup) {
+        BridgeGui old = gui;
+        forge.game.Game running = BridgeMain.currentGame;
+        if (started.get() && old != null) {
+            System.out.println("new game: ending the one in progress");
+            old.retire();
+            if (running != null && !running.isGameOver()) {
+                INPUT.execute(() -> {
+                    for (forge.game.player.Player p : running.getPlayers()) {
+                        try {
+                            IGameController c = old.controllerFor(p.getName());
+                            if (c != null) {
+                                c.concede();
+                            }
+                        } catch (RuntimeException e) {
+                            System.out.println("concede " + p.getName() + ": " + e);
+                        }
+                    }
+                });
+            }
+            gui = new BridgeGui(this::send);
+            gui.inheritStops(old);
+            started.set(false);
+        }
+        begin(gui, setup);
+    }
+
     public BridgeGui gui() {
         return gui;
     }
@@ -196,16 +233,34 @@ public final class BridgeServer {
                 // do not start anything. It is told who sits where — the
                 // "open" the tablet got when the game began — and asks for the
                 // board itself, as every client does on connect.
-                if (hs.requestUri() != null && hs.requestUri().contains("role=hand") && gui != null) {
+                // Before the tablet has started anything it simply waits: the
+                // game's messages reach it when there is a game.
+                if (hs.requestUri() != null && hs.requestUri().contains("role=hand")) {
                     joined.add(ctx.channel());
                     System.out.println("hand screen joined");
+                    if (gui != null) {
+                        for (String m : gui.catchUp()) {
+                            ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
+                        }
+                    }
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
+                client = ctx.channel();
+                // A game is already running: this is the tablet coming back —
+                // a reload, a screen that slept, a dropped Wi-Fi. Rejoin it,
+                // as the phone does, rather than dealing a new one; "New game"
+                // is a message ({"t":"start"}), never a side effect of a
+                // connection.
+                forge.game.Game running = BridgeMain.currentGame;
+                if (gui != null && started.get() && running != null && !running.isGameOver()) {
+                    System.out.println("client reconnected to the running game");
                     for (String m : gui.catchUp()) {
                         ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
                     }
                     super.userEventTriggered(ctx, evt);
                     return;
                 }
-                client = ctx.channel();
                 gui = new BridgeGui(BridgeServer.this::send);
                 System.out.println("client connected");
                 // Starting the game here, rather than at boot, means the first
@@ -227,6 +282,11 @@ public final class BridgeServer {
                 started.set(false);
                 if (startOnConnect) {
                     begin(gui, null);
+                } else {
+                    // No game here (a fresh engine, or the last one ended): a
+                    // screen that reconnects with an old board must not keep
+                    // drawing it as if it were live.
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
                 }
             }
             super.userEventTriggered(ctx, evt);
@@ -330,8 +390,44 @@ public final class BridgeServer {
                 // rather than starting on connect, because until it arrives
                 // there is no deck to deal from.
                 case "start":
-                    begin(g, in);
+                    newGame(in);
                     break;
+                // "Take that back": the game as it was before our last action
+                // (see Rewind). Run on the game's own pool while our seat waits
+                // for priority, as Forge's dev-mode state setup is.
+                case "rewind": {
+                    forge.game.Game game = BridgeMain.currentGame;
+                    if (game == null) {
+                        break;
+                    }
+                    game.getAction().invoke(() -> {
+                        try {
+                            if (Rewind.back(game)) {
+                                game.getAction().checkStateEffects(true);
+                                // The restore writes the game, not its view: the
+                                // stack, combat and turn the screen reads have to
+                                // be told, or a taken-back spell stays drawn.
+                                game.updateStackForView();
+                                game.updateCombatForView();
+                                game.updatePhaseForView();
+                                game.updateTurnForView();
+                                game.updatePlayerTurnForView();
+                                g.tell(java.util.List.of("Taken back — the game is as it was before that."));
+                            } else {
+                                g.tell(java.util.List.of("Nothing to take back yet."));
+                            }
+                        } catch (RuntimeException e) {
+                            System.out.println("rewind failed: " + e);
+                            e.printStackTrace(System.out);
+                            g.tell(java.util.List.of("Could not take that back: " + e.getMessage()));
+                        }
+                        if (BridgeMain.currentForwarder != null) {
+                            BridgeMain.currentForwarder.flush();
+                        }
+                        g.sendBoard();
+                    });
+                    break;
+                }
                 // Something the opponent's cardboard did to our side, enacted
                 // through the engine's own actions. See Declarations.
                 case "declare":

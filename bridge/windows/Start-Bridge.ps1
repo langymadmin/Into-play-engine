@@ -4,7 +4,7 @@
 #
 # No Maven, no bash. You need two things in place first:
 #
-#   1. This repository, cloned (for forge-gui\res — the 34,000 card scripts,
+#   1. This repository, cloned (for forge-gui\res - the 34,000 card scripts,
 #      which are NOT in the build artifact).
 #   2. An "engine" folder of jars, either from the CI artifact or from a local
 #      Maven build. See LOCAL-WINDOWS.md.
@@ -28,9 +28,17 @@ function Fail($msg) { Write-Host "`n  $msg`n" -ForegroundColor Red; exit 1 }
 # --- java -------------------------------------------------------------------
 $java = Get-Command java -ErrorAction SilentlyContinue
 if (-not $java) {
+    # Temurin installs here without always touching PATH for an open session.
+    $found = Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Recurse -Filter java.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -like "*\bin" } | Select-Object -First 1
+    if ($found) { $env:PATH = "$($found.DirectoryName);$env:PATH"; $java = Get-Command java }
+}
+if (-not $java) {
     Fail "No java on PATH. Install a Java 21 runtime (Temurin: winget install EclipseAdoptium.Temurin.21.JRE) and reopen this window."
 }
-$ver = (& java -version 2>&1 | Select-Object -First 1)
+# Through cmd: java prints its version on stderr, which Windows PowerShell
+# turns into a terminating error under ErrorActionPreference=Stop.
+$ver = (cmd /c "java -version 2>&1" | Select-Object -First 1)
 Write-Host "  java    $ver" -ForegroundColor DarkGray
 
 # --- the jars ---------------------------------------------------------------
@@ -45,7 +53,7 @@ Write-Host "  engine  $($jars.Count) jars in $EngineDir" -ForegroundColor DarkGr
 
 # --- the card scripts -------------------------------------------------------
 if (-not (Test-Path (Join-Path $Res "cardsfolder"))) {
-    Fail "No '$Res\cardsfolder'. The card scripts are not in the artifact — they come from this repository, so run this from a full clone."
+    Fail "No '$Res\cardsfolder'. The card scripts are not in the artifact - they come from this repository, so run this from a full clone."
 }
 $cards = (Get-ChildItem -Path (Join-Path $Res "cardsfolder") -Recurse -Filter *.txt).Count
 Write-Host "  cards   $cards scripts in $Res" -ForegroundColor DarkGray
@@ -60,6 +68,6 @@ $cp = "$EngineDir\*;$EngineDir"
 if (Test-Path "engine-override") { $cp = "engine-override;$cp" }
 
 Write-Host "`n  starting the bridge on ws://localhost:$Port/play" -ForegroundColor Cyan
-Write-Host "  (first start loads 34k card scripts — about five seconds)`n" -ForegroundColor DarkGray
+Write-Host "  (first start loads 34k card scripts - about five seconds)`n" -ForegroundColor DarkGray
 
 & java "-Xmx$Heap" -cp $cp forge.intoplay.BridgeMain $Res $Port

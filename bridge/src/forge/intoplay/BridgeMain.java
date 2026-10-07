@@ -200,6 +200,17 @@ public final class BridgeMain {
                         return a.size() == 0 || a.get(0).getAsInt() != 2;
                     }
 
+                    // Our seat is about to be asked what to do with priority:
+                    // the one safe moment to remember the game for "take that
+                    // back" (see Rewind).
+                    @Override
+                    public java.util.List<forge.game.spellability.SpellAbility> chooseSpellAbilityToPlay() {
+                        if (!isOffTable(p.getName())) {
+                            Rewind.remember(game);
+                        }
+                        return super.chooseSpellAbilityToPlay();
+                    }
+
                     // The off-table seat's blocks are cardboard, declared on the
                     // tablet just before this runs (CardboardBlocks). Forge's own
                     // InputBlock would ask that seat again, about stand-ins it
