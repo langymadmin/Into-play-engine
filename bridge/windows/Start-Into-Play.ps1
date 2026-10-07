@@ -1,77 +1,116 @@
-# One click: the engine, the screen, and the browser on the table.
+# One click: the engine, serving the table screen itself, and the browser.
 #
+#   Double-click the desktop icon (Install-Shortcut.ps1 makes it), or
 #   powershell -ExecutionPolicy Bypass -File bridge\windows\Start-Into-Play.ps1
 #
-# Or double-click the desktop icon that Install-Shortcut.ps1 makes.
+# One process, no windows. The engine serves the app's built files
+# (into-play\dist) on its own port, so there is no dev server to start:
+#   tablet  http://localhost:8099/?ui=3
+#   phone   http://<this PC>:8099/?ui=3&view=hand   ("Pair a phone" shows it)
 #
-# Starts whatever is not already running, and only that:
-#   - the engine (Start-Bridge.ps1) in its own minimized window, so its log is
-#     there if something goes wrong. A running engine keeps its game: clicking
-#     again just reopens the screen, it does not deal a new one.
-#   - the screen server (into-play's "npm run dev") with --host, so a phone on
-#     the same Wi-Fi or hotspot can open its hand ("Pair a phone" in the menu).
-# Then opens the table screen.
+# What it does, and only what is needed:
+#   - the app is rebuilt (npm run build) only when its source is newer than
+#     the last build - a quarter of a minute, while the cards load anyway;
+#   - the engine starts hidden, its output in bridge\logs\engine.log. A running
+#     engine keeps its game: clicking again just reopens the screen;
+#   - then the browser opens the table.
+# Stop-Into-Play.ps1 stops the engine (or end it from Task Manager: "java").
 #
 # Expects the two repositories side by side, as they were cloned:
 #   ...\into play\into-play-engine   (this one)
 #   ...\into play\into-play          (the app)
+#
+# ASCII only: Windows PowerShell 5.1 misreads anything else in a script.
 
 param(
     [string]$App = "",
-    [int]$EnginePort = 8099,
-    [int]$ScreenPort = 5173,
+    [int]$Port = 8099,
+    [string]$Heap = "2g",
     [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
 $engineRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $App) { $App = Join-Path (Split-Path -Parent $engineRoot) "into-play" }
+$dist = Join-Path $App "dist"
+$logs = Join-Path $engineRoot "bridge\logs"
+$url = "http://localhost:$Port/?ui=3"
 
+Add-Type -AssemblyName System.Windows.Forms
+# Run hidden, so problems are said in a box rather than a console.
+function Say($msg, $buttons = "OK", $icon = "Error") {
+    return [System.Windows.Forms.MessageBox]::Show($msg, "Into Play", $buttons, $icon)
+}
 function Listening($port) {
     return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
-function Fail($msg) {
-    Write-Host "`n  $msg`n" -ForegroundColor Red
-    Read-Host "Press Enter to close"
-    exit 1
+function ServesApp {
+    try { return (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://localhost:$Port/").StatusCode -eq 200 }
+    catch { return $false }
+}
+function Open { if (-not $NoBrowser) { Start-Process $url } }
+
+# --- already running? -------------------------------------------------------
+if (Listening $Port) {
+    if (ServesApp) { Open; exit 0 }
+    # An engine started the old way (Start-Bridge.ps1): it plays, but has no
+    # screen to serve.
+    $a = Say "An engine started the old way is running on port $Port. Restart it so it also serves the screen? Its current game ends." "YesNo" "Question"
+    if ($a -ne "Yes") { exit 0 }
+    Get-NetTCPConnection -LocalPort $Port -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+    Start-Sleep -Seconds 1
 }
 
-# --- the engine -------------------------------------------------------------
-if (Listening $EnginePort) {
-    Write-Host "  engine  already running on port $EnginePort - its game is kept" -ForegroundColor DarkGray
-} else {
-    Write-Host "  engine  starting (about half a minute to load the cards)..." -ForegroundColor Cyan
-    Start-Process powershell -WindowStyle Minimized -WorkingDirectory $engineRoot -ArgumentList @(
-        # Quoted by hand: Start-Process passes these as one line, and the
-        # folder ("into play") has a space in it.
-        "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "`"$(Join-Path $PSScriptRoot 'Start-Bridge.ps1')`"", "-Port", $EnginePort)
+# --- java -------------------------------------------------------------------
+$java = (Get-Command java -ErrorAction SilentlyContinue).Source
+if (-not $java) {
+    # Temurin installs here without always touching PATH.
+    $java = (Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Recurse -Filter java.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -like "*\bin" } | Select-Object -First 1).FullName
 }
+if (-not $java) { Say "No Java found. Install Java 21 (winget install EclipseAdoptium.Temurin.21.JRE) and try again."; exit 1 }
+if (-not (Test-Path (Join-Path $engineRoot "engine"))) { Say "No 'engine' folder in $engineRoot. See bridge\windows\LOCAL-WINDOWS.md."; exit 1 }
 
-# --- the screen -------------------------------------------------------------
-if (Listening $ScreenPort) {
-    Write-Host "  screen  already running on port $ScreenPort" -ForegroundColor DarkGray
-} else {
-    if (-not (Test-Path (Join-Path $App "package.json"))) {
-        Fail "No into-play app at $App. Clone it next to into-play-engine, or pass -App <folder>."
+# --- the engine (hidden; loads the cards while the app builds) --------------
+New-Item -ItemType Directory -Force $logs | Out-Null
+$cp = "engine\*;engine"
+if (Test-Path (Join-Path $engineRoot "engine-override")) { $cp = "engine-override;$cp" }
+# Quoted by hand: Start-Process joins these into one line, and the folder
+# ("into play") has a space in it.
+Start-Process -FilePath $java -WindowStyle Hidden -WorkingDirectory $engineRoot `
+    -RedirectStandardOutput (Join-Path $logs "engine.log") -RedirectStandardError (Join-Path $logs "engine-errors.log") `
+    -ArgumentList @("-Xmx$Heap", "`"-Dintoplay.app=$dist`"", "-cp", "`"$cp`"", "forge.intoplay.BridgeMain", "forge-gui\res", $Port)
+
+# --- the app: rebuilt only when it changed ----------------------------------
+if (-not (Test-Path (Join-Path $App "package.json"))) {
+    Say "No into-play app at $App. Clone it next to into-play-engine."; exit 1
+}
+$built = Join-Path $dist "index.html"
+$stale = -not (Test-Path $built)
+if (-not $stale) {
+    $at = (Get-Item $built).LastWriteTime
+    $stale = [bool](Get-ChildItem (Join-Path $App "src"), (Join-Path $App "public") -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -gt $at } | Select-Object -First 1)
+    foreach ($f in "index.html", "package.json", "vite.config.js") {
+        $p = Join-Path $App $f
+        if ((Test-Path $p) -and (Get-Item $p).LastWriteTime -gt $at) { $stale = $true }
     }
-    if (-not (Test-Path (Join-Path $App "node_modules"))) {
-        Write-Host "  screen  first run: installing packages..." -ForegroundColor Cyan
-        Push-Location $App; & npm.cmd install; Pop-Location
-    }
-    Write-Host "  screen  starting..." -ForegroundColor Cyan
+}
+if ($stale) {
     # npm.cmd, not npm: PowerShell refuses npm.ps1 under the default policy.
-    Start-Process cmd -WindowStyle Minimized -WorkingDirectory $App -ArgumentList @(
-        "/k", "npm.cmd run dev -- --host --port $ScreenPort --strictPort")
+    $npm = "cd /d `"$App`" && (if not exist node_modules npm.cmd install) && npm.cmd run build"
+    $b = Start-Process cmd -WindowStyle Hidden -Wait -PassThru `
+        -RedirectStandardOutput (Join-Path $logs "build.log") -RedirectStandardError (Join-Path $logs "build-errors.log") `
+        -ArgumentList @("/c", $npm)
+    if ($b.ExitCode -ne 0 -and -not (Test-Path $built)) {
+        Say "Building the screen failed. See $logs\build-errors.log."; exit 1
+    }
 }
 
 # --- wait, then open --------------------------------------------------------
 $deadline = (Get-Date).AddSeconds(120)
-while (-not ((Listening $EnginePort) -and (Listening $ScreenPort))) {
-    if ((Get-Date) -gt $deadline) {
-        Fail "Still not up after two minutes. Look at the two minimized windows for the reason."
-    }
+while (-not (Listening $Port)) {
+    if ((Get-Date) -gt $deadline) { Say "The engine did not start in two minutes. See $logs\engine-errors.log."; exit 1 }
     Start-Sleep -Milliseconds 700
 }
-$url = "http://localhost:$ScreenPort/?ui=3&bridge=ws://localhost:$EnginePort/play"
-Write-Host "  open    $url" -ForegroundColor Green
-if (-not $NoBrowser) { Start-Process $url }
+Open

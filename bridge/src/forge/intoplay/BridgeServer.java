@@ -348,6 +348,8 @@ public final class BridgeServer {
                                 // The metagame for "What are they playing?" (GET /meta/...).
                                 .addLast(new MetaService())
                                 .addLast(new SoundFiles())
+                                // The table screen itself, when started with -Dintoplay.app.
+                                .addLast(new AppFiles())
                                 .addLast(new Handler());
                     }
                 });

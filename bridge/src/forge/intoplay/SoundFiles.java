@@ -31,6 +31,12 @@ final class SoundFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     static volatile Path dir;
 
+    // Only /sound/: the rest goes on to AppFiles.
+    @Override
+    public boolean acceptInboundMessage(final Object msg) {
+        return msg instanceof FullHttpRequest r && r.uri().startsWith("/sound/");
+    }
+
     @Override
     protected void channelRead0(final ChannelHandlerContext ctx, final FullHttpRequest req) {
         String uri = req.uri();
