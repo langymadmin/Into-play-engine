@@ -1,0 +1,15 @@
+# How the stack shows spells and abilities: Kozilek's Command (a modal
+# spell) and Sowing Mycospawn (its cast trigger goes on the stack over it).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Kozilek's Command;Sowing Mycospawn
+humanbattlefield=Wastes;Wastes;Wastes;Wastes;Forest;Forest;Forest;Forest
+humanlibrary=Forest;Wastes;Swamp;Island;Plains;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
