@@ -181,6 +181,9 @@ public class BridgeGui extends AbstractGuiGame {
         }
     }
 
+    /** This game's events, as sent — replayed to a screen that reconnects. */
+    private final java.util.ArrayDeque<String> eventHistory = new java.util.ArrayDeque<>();
+
     /** The last phase, turn, and each seat's prompt and buttons — see {@link #catchUp}. */
     private final java.util.Map<String, String> latest = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -189,6 +192,9 @@ public class BridgeGui extends AbstractGuiGame {
         java.util.List<String> out = new java.util.ArrayList<>();
         if (lastOpen != null) {
             out.add(lastOpen);
+        }
+        synchronized (eventHistory) {
+            out.addAll(eventHistory);
         }
         for (String k : java.util.List.of("turn", "phase")) {
             if (latest.containsKey(k)) {
@@ -1121,7 +1127,27 @@ public class BridgeGui extends AbstractGuiGame {
 
     @Override
     public void finishGame() {
-        send(msg("gameOver"));
+        // Who won, as far as the engine knows — the screen asks the player to
+        // confirm it for the match log, since a game against cardboard often
+        // ends at the table (they concede) rather than in the engine.
+        JsonObject o = msg("gameOver");
+        try {
+            forge.game.Game game = BridgeMain.currentGame;
+            forge.game.GameOutcome out = game == null ? null : game.getOutcome();
+            if (out != null) {
+                o.addProperty("draw", out.isDraw());
+                if (out.getWinningLobbyPlayer() != null) {
+                    o.addProperty("winner", out.getWinningLobbyPlayer().getName());
+                }
+                o.addProperty("turn", out.getLastTurnNumber());
+                if (out.getWinCondition() != null) {
+                    o.addProperty("how", String.valueOf(out.getWinCondition()));
+                }
+            }
+        } catch (RuntimeException e) {
+            System.out.println("game outcome: " + e);
+        }
+        send(o);
     }
 
     @Override
@@ -1782,6 +1808,14 @@ public class BridgeGui extends AbstractGuiGame {
         o.addProperty("kind", event.getClass().getSimpleName());
         o.addProperty("text", String.valueOf(event));
         send(o);
+        // Kept for a screen that reconnects: its log and the match log's
+        // replay are rebuilt from these (see catchUp).
+        synchronized (eventHistory) {
+            eventHistory.addLast(o.toString());
+            while (eventHistory.size() > 2500) {
+                eventHistory.removeFirst();
+            }
+        }
 
         // The moment the fork exists for. The spell was legal, it has finished
         // resolving, and the engine did nothing to the phantom because a
@@ -1834,6 +1868,22 @@ public class BridgeGui extends AbstractGuiGame {
 
         if (event instanceof GameEventTurnPhase tp) {
             sendPhase(tp);
+        }
+
+        // Their window to respond closes with the stack. Forge interrupts the
+        // off-table seats' auto-pass when we cast (so they are asked while
+        // our spell is on the stack — the moment for "they Counterspell it")
+        // and never re-arms it, which left them asked at every step for the
+        // rest of the turn. Once the stack is empty again, they go back to
+        // passing.
+        if ((event instanceof forge.game.event.GameEventSpellResolved
+                || event instanceof forge.game.event.GameEventSpellRemovedFromStack)
+                && BridgeMain.currentGame != null && BridgeMain.currentGame.getStack().isEmpty() && !NO_AUTOPASS) {
+            for (String seatName : BridgeMain.OPPONENTS) {
+                if (controllerFor(seatName) instanceof forge.player.PlayerControllerHuman h && !h.mayAutoPass()) {
+                    h.autoPassUntilEndOfTurn();
+                }
+            }
         }
 
         // The sound Forge itself would play for this event (a land, a tap, a
