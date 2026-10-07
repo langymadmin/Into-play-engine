@@ -151,7 +151,8 @@ public final class BridgeMain {
                     @Override
                     public Player chooseStartingPlayer(final boolean isFirstGame) {
                         String seat = "me".equals(first) ? SEAT
-                                : "them".equals(first) ? OFF_TABLE : null;
+                                : "them".equals(first) ? OFF_TABLE
+                                : first != null && first.startsWith("seat:") ? first.substring(5) : null;
                         if (seat != null) {
                             for (Player candidate : game.getPlayers()) {
                                 if (seat.equals(candidate.getName())) {
@@ -171,7 +172,8 @@ public final class BridgeMain {
                             final forge.game.card.CardCollectionView sourceList, final forge.game.spellability.SpellAbility sa,
                             final String title, final int min, final int max, final boolean isOptional,
                             final java.util.Map<String, Object> params) {
-                        BridgeGui gui = current;
+                        // This seat's own screen (two in a versus game).
+                        BridgeGui gui = getGui() instanceof BridgeGui own ? own : current;
                         if (gui == null || sa == null || sa.getApi() != forge.game.ability.ApiType.TwoPiles) {
                             return super.chooseCardsForEffect(sourceList, sa, title, min, max, isOptional, params);
                         }
@@ -192,7 +194,8 @@ public final class BridgeMain {
                     public boolean chooseCardsPile(final forge.game.spellability.SpellAbility sa,
                                                    final forge.game.card.CardCollectionView pile1,
                                                    final forge.game.card.CardCollectionView pile2, final String faceUp) {
-                        BridgeGui gui = current;
+                        // This seat's own screen (two in a versus game).
+                        BridgeGui gui = getGui() instanceof BridgeGui own ? own : current;
                         if (gui == null) {
                             return super.chooseCardsPile(sa, pile1, pile2, faceUp);
                         }
@@ -205,7 +208,7 @@ public final class BridgeMain {
                     // back" (see Rewind).
                     @Override
                     public java.util.List<forge.game.spellability.SpellAbility> chooseSpellAbilityToPlay() {
-                        if (!isOffTable(p.getName())) {
+                        if (!isOffTable(p.getName()) && !VERSUS) {
                             Rewind.remember(game);
                         }
                         return super.chooseSpellAbilityToPlay();
@@ -728,9 +731,88 @@ public final class BridgeMain {
      *              first. Null when a scenario file started the game on
      *              connect, which keeps the old test clients working unchanged.
      */
+    /** True while two real players share the engine (no off-table seat). */
+    static volatile boolean VERSUS;
+
+    /**
+     * Two people, two screens, one game: no Phantom. Each player's deck is
+     * real, each has their own gui — so a prompt, a question, a library search
+     * reaches only the screen of the player it belongs to, as in Forge's own
+     * network play — and each screen sees the other's hand and library only
+     * as counts.
+     *
+     * <p>Nothing of the off-table machinery runs: no seal, no cardboard
+     * blocks, no "their table", no take-back (it would undo the other
+     * player's turn too).
+     */
+    static void runVersus(final BridgeGui guiA, final JsonPair a, final BridgeGui guiB, final JsonPair b,
+                          final String first) {
+        VERSUS = true;
+        OPPONENTS = List.of();
+        OFF_TABLE = "";
+        current = guiA;
+        Deck deckA = deckFrom(a.setup, guiA);
+        Deck deckB = deckFrom(b.setup, guiB);
+        final boolean commander = !deckA.getCommanders().isEmpty() || !deckB.getCommanders().isEmpty();
+        // "first": a seat's name, or anything else for Forge's coin.
+        String firstSeat = first == null ? null : "seat:" + first;
+        List<RegisteredPlayer> registered = new ArrayList<>();
+        registered.add((commander ? RegisteredPlayer.forCommander(deckA) : new RegisteredPlayer(deckA))
+                .setPlayer(lobbyPlayer(a.name, firstSeat)));
+        registered.add((commander ? RegisteredPlayer.forCommander(deckB) : new RegisteredPlayer(deckB))
+                .setPlayer(lobbyPlayer(b.name, firstSeat)));
+        GameRules rules = new GameRules(commander ? GameType.Commander : GameType.Constructed);
+        if (commander) {
+            rules.addAppliedVariant(GameType.Commander);
+        }
+        Match match = new Match(rules, registered, "Bridge versus");
+        Game game = new Game(registered, rules, match);
+        currentGame = game;
+
+        for (Player p : game.getPlayers()) {
+            if (!(p.getController() instanceof PlayerControllerHuman human)) {
+                continue;
+            }
+            BridgeGui g = p.getName().equals(a.name) ? guiA : guiB;
+            human.setGui(g);
+            human.getYieldController().setPref(
+                    forge.localinstance.properties.ForgePreferences.FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
+            g.setGameView(null);
+            g.setGameView(game.getView());
+            g.setOriginalGameController(p.getView(), human);
+            game.subscribeToEvents(new FControlGameEventHandler(human));
+        }
+        for (BridgeGui g : List.of(guiA, guiB)) {
+            forge.gui.control.GameEventForwarder fw = new forge.gui.control.GameEventForwarder(g);
+            game.subscribeToEvents(fw);
+            for (Player p : game.getPlayers()) {
+                if (p.getController() instanceof PlayerControllerHuman human) {
+                    human.getInputQueue().addObserver(fw);
+                }
+            }
+            if (g == guiA) {
+                currentForwarder = fw;
+            }
+        }
+        for (Player p : game.getPlayers()) {
+            TrackableCollection<forge.game.player.PlayerView> own = new TrackableCollection<>();
+            own.add(p.getView());
+            BridgeGui g = p.getName().equals(a.name) ? guiA : guiB;
+            g.setVersus(true);
+            g.openView(own);
+        }
+        System.out.println("=== starting versus: " + a.name + " vs " + b.name + " ===");
+        match.startGame(game);
+        System.out.println("=== versus over ===");
+    }
+
+    /** A player's name and their {"deck":…, "commanders":…} for {@link #runVersus}. */
+    record JsonPair(String name, com.google.gson.JsonObject setup) { }
+
     static void runGame(final String res, final BridgeGui gui, final String statePath,
                         final com.google.gson.JsonObject setup) {
         current = gui;
+        VERSUS = false;
 
         final boolean ownDeck = setup != null && setup.has("deck") && setup.get("deck").isJsonArray();
         // "me", "them", or anything else for Forge's own coin toss.

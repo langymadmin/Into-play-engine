@@ -473,6 +473,16 @@ public class BridgeGui extends AbstractGuiGame {
                 if (in == null) {
                     continue;
                 }
+                // Two real players: the other one's hand and library are
+                // theirs to see. This screen gets how many, not which.
+                if (versus && (z == ZoneType.Hand || z == ZoneType.Library) && !isMine(p)) {
+                    int n = 0;
+                    for (CardView ignored : in) {
+                        n++;
+                    }
+                    s.addProperty(z == ZoneType.Hand ? "handCount" : "libraryCount", n);
+                    continue;
+                }
                 JsonArray arr = new JsonArray();
                 for (CardView c : in) {
                     JsonObject cj = card(c);
@@ -569,6 +579,16 @@ public class BridgeGui extends AbstractGuiGame {
         }
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
+        if (versus) {
+            o.addProperty("versus", true);
+            JsonArray others = new JsonArray();
+            for (PlayerView pv : gv.getPlayers()) {
+                if (!isMine(pv)) {
+                    others.add(pv.getName());
+                }
+            }
+            o.add("opponents", others);
+        }
         // How many steps "take that back" can go (see Rewind).
         if (game != null) {
             o.addProperty("rewind", Rewind.available(game));
@@ -1013,7 +1033,7 @@ public class BridgeGui extends AbstractGuiGame {
         // Their turn: one window, at their end step, unless the screen asked
         // for more ("theirSteps"). Something on the stack still wakes us —
         // Forge only skips a step whose stack is empty.
-        if (playerTurn != null && BridgeMain.isOffTable(playerTurn.getName())) {
+        if (playerTurn != null && (BridgeMain.isOffTable(playerTurn.getName()) || (versus && !isMine(playerTurn)))) {
             return !theirStops.contains(phase);
         }
         return !stops.isEmpty() && !stops.contains(phase);
@@ -1734,9 +1754,42 @@ public class BridgeGui extends AbstractGuiGame {
         // prompted first means it changes with the coin toss.
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
+        if (versus) {
+            // The other player, a real one: no off-table seat.
+            JsonArray others = new JsonArray();
+            if (getGameView() != null && getGameView().getPlayers() != null) {
+                for (PlayerView pv : getGameView().getPlayers()) {
+                    if (!isMine(pv)) {
+                        others.add(pv.getName());
+                    }
+                }
+            }
+            o.add("opponents", others);
+            o.add("offTable", com.google.gson.JsonNull.INSTANCE);
+            o.addProperty("versus", true);
+        }
         o.add("addresses", lanAddresses());
         lastOpen = o.toString();
         send(o);
+    }
+
+    /** Two real players: this gui speaks for one of them (see BridgeMain.runVersus). */
+    private volatile boolean versus;
+
+    public void setVersus(final boolean v) {
+        versus = v;
+    }
+
+    private boolean isMine(final PlayerView p) {
+        if (getLocalPlayers() == null) {
+            return true;
+        }
+        for (PlayerView mine : getLocalPlayers()) {
+            if (mine.getName().equals(p.getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The "open" message as sent, for a screen that joins later (the phone's hand). */

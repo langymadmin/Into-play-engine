@@ -94,6 +94,26 @@ public final class BridgeServer {
     private volatile Channel client;
     private volatile BridgeGui gui;
 
+    // Two real players (see BridgeMain.runVersus): the host waiting for the
+    // second player, then one gui and one screen per player.
+    private volatile JsonObject versusHost;
+    private volatile Channel versusHostChannel;
+    private final java.util.Map<String, BridgeGui> seatGuis = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<String, Channel> seatChannels = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Channel, String> channelSeat = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void sendSeat(final String seat, final String json) {
+        Channel c = seatChannels.get(seat);
+        if (c != null && c.isActive()) {
+            c.writeAndFlush(new TextWebSocketFrame(json));
+        }
+    }
+
+    private static String nameOf(final JsonObject setup, final String fallback) {
+        String n = setup != null && setup.has("name") && !setup.get("name").isJsonNull() ? setup.get("name").getAsString().trim() : "";
+        return n.isEmpty() ? fallback : (n.length() > 24 ? n.substring(0, 24) : n);
+    }
+
     /** Messages that drive Forge's input, and so may end up waiting on a question. */
     private static final java.util.Set<String> ON_INPUT_THREAD =
             java.util.Set.of("ok", "cancel", "concede", "card", "seat", "offTable", "declare");
@@ -144,6 +164,13 @@ public final class BridgeServer {
      * one still says on its way out reaches the screen.
      */
     private void newGame(final JsonObject setup) {
+        // From a versus game (or its lobby) back to a game against the table.
+        if (!seatGuis.isEmpty() || versusHost != null) {
+            endEverything();
+            versusHost = null;
+            versusHostChannel = null;
+            gui = new BridgeGui(this::send);
+        }
         BridgeGui old = gui;
         forge.game.Game running = BridgeMain.currentGame;
         if (started.get() && old != null) {
@@ -168,6 +195,113 @@ public final class BridgeServer {
             started.set(false);
         }
         begin(gui, setup);
+    }
+
+    /** Everything that is running stops: the single-screen game and a versus one. */
+    private void endEverything() {
+        BridgeGui old = gui;
+        forge.game.Game running = BridgeMain.currentGame;
+        java.util.List<BridgeGui> guis = new java.util.ArrayList<>(seatGuis.values());
+        if (old != null) {
+            guis.add(old);
+        }
+        for (BridgeGui g : guis) {
+            g.retire();
+        }
+        if (running != null && !running.isGameOver()) {
+            INPUT.execute(() -> {
+                for (forge.game.player.Player p : running.getPlayers()) {
+                    for (BridgeGui g : guis) {
+                        try {
+                            IGameController c = g.controllerFor(p.getName());
+                            if (c != null) {
+                                c.concede();
+                                break;
+                            }
+                        } catch (RuntimeException e) {
+                            System.out.println("concede " + p.getName() + ": " + e);
+                        }
+                    }
+                }
+            });
+        }
+        seatGuis.clear();
+        seatChannels.clear();
+        channelSeat.clear();
+        started.set(false);
+    }
+
+    private String lobbyJson(final boolean youHost) {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "lobby");
+        o.addProperty("host", nameOf(versusHost, "Player 1"));
+        o.addProperty("youHost", youHost);
+        // Where the second player's device should go (a QR on the host's screen).
+        o.add("addresses", BridgeGui.lanAddresses());
+        return o.toString();
+    }
+
+    /** The first player: their deck and name, waiting for the second. */
+    private void hostVersus(final Channel ch, final JsonObject setup) {
+        endEverything();
+        versusHost = setup;
+        versusHostChannel = ch;
+        client = ch;
+        System.out.println("versus: " + nameOf(setup, "Player 1") + " is waiting for a second player");
+        ch.writeAndFlush(new TextWebSocketFrame(lobbyJson(true)));
+        // Anyone already connected (the second device opened first) is shown
+        // the lobby too.
+        for (Channel j : joined) {
+            j.writeAndFlush(new TextWebSocketFrame(lobbyJson(false)));
+        }
+    }
+
+    /** The second player arrives: deal, one gui and one screen each. */
+    private void joinVersus(final Channel ch, final JsonObject setup) {
+        JsonObject host = versusHost;
+        Channel hostCh = versusHostChannel;
+        if (host == null || hostCh == null) {
+            ch.writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
+            return;
+        }
+        String a = nameOf(host, "Player 1");
+        String b = nameOf(setup, "Player 2");
+        if (b.equalsIgnoreCase(a)) {
+            b = b + " 2";
+        }
+        final String nameA = a, nameB = b;
+        BridgeGui ga = new BridgeGui(json -> sendSeat(nameA, json));
+        BridgeGui gb = new BridgeGui(json -> sendSeat(nameB, json));
+        seatGuis.put(nameA, ga);
+        seatGuis.put(nameB, gb);
+        seatChannels.put(nameA, hostCh);
+        seatChannels.put(nameB, ch);
+        channelSeat.put(hostCh, nameA);
+        channelSeat.put(ch, nameB);
+        for (BridgeGui g : java.util.List.of(ga, gb)) {
+            g.setStops(java.util.List.of("MAIN1", "COMBAT_DECLARE_ATTACKERS", "MAIN2", "END_OF_TURN"));
+        }
+        gui = ga;
+        versusHost = null;
+        versusHostChannel = null;
+        started.set(true);
+        // Who goes first, as the host chose: "me" is the host, "them" the guest.
+        String f = host.has("first") ? host.get("first").getAsString() : "toss";
+        String first = "me".equals(f) ? nameA : "them".equals(f) ? nameB : null;
+        // Each screen is told which seat it is, to come back to it after a reconnect.
+        hostCh.writeAndFlush(new TextWebSocketFrame("{\"t\":\"you\",\"seat\":" + com.google.gson.JsonParser.parseString("\"" + nameA.replace("\"", "") + "\"") + "}"));
+        ch.writeAndFlush(new TextWebSocketFrame("{\"t\":\"you\",\"seat\":" + com.google.gson.JsonParser.parseString("\"" + nameB.replace("\"", "") + "\"") + "}"));
+        System.out.println("versus: " + nameA + " vs " + nameB);
+        forge.util.ThreadUtil.invokeInGameThread(() -> {
+            try {
+                BridgeMain.runVersus(ga, new BridgeMain.JsonPair(nameA, host), gb, new BridgeMain.JsonPair(nameB, setup), first);
+            } catch (Throwable t) {
+                System.out.println("[versus ended] " + t);
+                t.printStackTrace(System.out);
+                ga.sendFatal(String.valueOf(t));
+                gb.sendFatal(String.valueOf(t));
+            }
+        });
     }
 
     public BridgeGui gui() {
@@ -258,6 +392,38 @@ public final class BridgeServer {
                     super.userEventTriggered(ctx, evt);
                     return;
                 }
+                // Versus: a player's screen coming back ("seat=Name").
+                String uri = hs.requestUri() == null ? "" : hs.requestUri();
+                java.util.regex.Matcher sm = java.util.regex.Pattern.compile("[?&]seat=([^&]+)").matcher(uri);
+                if (sm.find() && !seatGuis.isEmpty()) {
+                    String seat = java.net.URLDecoder.decode(sm.group(1), java.nio.charset.StandardCharsets.UTF_8);
+                    BridgeGui sg = seatGuis.get(seat);
+                    if (sg != null) {
+                        seatChannels.put(seat, ctx.channel());
+                        channelSeat.put(ctx.channel(), seat);
+                        System.out.println("versus: " + seat + " reconnected");
+                        for (String m : sg.catchUp()) {
+                            ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
+                        }
+                        super.userEventTriggered(ctx, evt);
+                        return;
+                    }
+                }
+                // Versus: the host is waiting for a second player — this screen
+                // may be that player. It is shown the lobby; nothing starts.
+                if (versusHost != null && ctx.channel() != versusHostChannel) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(lobbyJson(false)));
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
+                // A versus game is running and this screen is neither player:
+                // it must not see a player's hand. Told so, and nothing more.
+                if (!seatGuis.isEmpty()) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(
+                            "{\"t\":\"lobby\",\"full\":true,\"players\":" + seatGuis.keySet().size() + "}"));
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
                 client = ctx.channel();
                 // A game is already running: this is the tablet coming back —
                 // a reload, a screen that slept, a dropped Wi-Fi. Rejoin it,
@@ -309,10 +475,6 @@ public final class BridgeServer {
 
         @Override
         protected void channelRead0(final ChannelHandlerContext ctx, final TextWebSocketFrame frame) {
-            BridgeGui g = gui;
-            if (g == null) {
-                return;
-            }
             final JsonObject in;
             try {
                 in = JsonParser.parseString(frame.text()).getAsJsonObject();
@@ -321,6 +483,23 @@ public final class BridgeServer {
                 return;
             }
             final String t = in.has("t") ? in.get("t").getAsString() : "";
+            // The second player joining a waiting versus game.
+            if ("join".equals(t)) {
+                joinVersus(ctx.channel(), in);
+                return;
+            }
+            // The host starting a game against a second player on their own
+            // screen: wait for them.
+            if ("start".equals(t) && in.has("versus") && in.get("versus").getAsBoolean()) {
+                hostVersus(ctx.channel(), in);
+                return;
+            }
+            // A versus player's screen speaks for its own gui only.
+            String seatOf = channelSeat.get(ctx.channel());
+            BridgeGui g = seatOf != null ? seatGuis.get(seatOf) : gui;
+            if (g == null) {
+                return;
+            }
             // A press may name the seat it is for. Omitting it means "whichever
             // seat was just given buttons", which is right for one screen and
             // wrong the moment the phone and the tablet both press.
@@ -585,6 +764,7 @@ public final class BridgeServer {
 
         @Override
         public void channelInactive(final ChannelHandlerContext ctx) {
+            channelSeat.remove(ctx.channel());
             if (joined.remove(ctx.channel())) {
                 System.out.println("hand screen disconnected");
                 announceScreens();
