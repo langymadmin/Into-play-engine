@@ -191,6 +191,8 @@ public final class BridgeServer {
                                 // form's true is allowExtensions, and an exact path
                                 // match silently dropped any query string.
                                 .addLast(new WebSocketServerProtocolHandler("/play", null, true, 1 << 20, false, true))
+                                // Forge's sound effects for the screen (GET /sound/x.mp3).
+                                .addLast(new SoundFiles())
                                 .addLast(new Handler());
                     }
                 });
@@ -211,6 +213,15 @@ public final class BridgeServer {
      * one cast from the tablet.
      */
     private final java.util.Set<Channel> joined = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * How many phones hold the hand. The tablet turns its own hand row face
+     * down while one does, and private choices (scry, a library search) are
+     * made on the phone.
+     */
+    private void announceScreens() {
+        send("{\"t\":\"screens\",\"hands\":" + joined.size() + "}");
+    }
 
     private void send(final String json) {
         Channel c = client;
@@ -238,6 +249,7 @@ public final class BridgeServer {
                 if (hs.requestUri() != null && hs.requestUri().contains("role=hand")) {
                     joined.add(ctx.channel());
                     System.out.println("hand screen joined");
+                    announceScreens();
                     if (gui != null) {
                         for (String m : gui.catchUp()) {
                             ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
@@ -258,11 +270,14 @@ public final class BridgeServer {
                     for (String m : gui.catchUp()) {
                         ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
                     }
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"screens\",\"hands\":" + joined.size() + "}"));
                     super.userEventTriggered(ctx, evt);
                     return;
                 }
                 gui = new BridgeGui(BridgeServer.this::send);
                 System.out.println("client connected");
+                // A phone may have joined first.
+                ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"screens\",\"hands\":" + joined.size() + "}"));
                 // Starting the game here, rather than at boot, means the first
                 // prompt cannot be sent before anyone is listening to hear it.
                 //
@@ -572,6 +587,7 @@ public final class BridgeServer {
         public void channelInactive(final ChannelHandlerContext ctx) {
             if (joined.remove(ctx.channel())) {
                 System.out.println("hand screen disconnected");
+                announceScreens();
                 return;
             }
             System.out.println("client disconnected");

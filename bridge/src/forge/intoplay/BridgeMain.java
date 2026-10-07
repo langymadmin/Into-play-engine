@@ -350,6 +350,7 @@ public final class BridgeMain {
         Lang.createInstance("en-US");
         Localizer.getInstance().initialize("en-US", res + "/languages/");
         loadCards(res);
+        SoundFiles.init(res);
         // The opponent's cards are cardboard: an ability with nothing legal to
         // target on the table may still be pointed at one of theirs.
         // Reflective, so a bridge running on an engine built before this switch

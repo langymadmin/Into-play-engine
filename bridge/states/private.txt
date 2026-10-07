@@ -1,0 +1,15 @@
+# Private choices on the phone: Preordain's scry and Evolving Wilds' search
+# open on the hand screen while one is paired; a second land shows "why not".
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Preordain;Forest;Mountain
+humanbattlefield=Island;Island;Evolving Wilds
+humanlibrary=Plains;Swamp;Counterspell;Forest;Island;Lightning Bolt;Mountain;Brainstorm
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

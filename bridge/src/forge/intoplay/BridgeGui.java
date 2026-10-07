@@ -615,6 +615,9 @@ public class BridgeGui extends AbstractGuiGame {
         if (game.getMonarch() == p) {
             s.addProperty("monarch", true);
         }
+        // For "why can't I play that?": a land refused after the land drop.
+        s.addProperty("landsPlayed", p.getLandsPlayedThisTurn());
+        s.addProperty("maxLands", p.getMaxLandPlays());
         if (game.getHasInitiative() == p) {
             s.addProperty("initiative", true);
         }
@@ -1197,11 +1200,19 @@ public class BridgeGui extends AbstractGuiGame {
         } finally {
             pending.remove(id);
             openAsks.remove(id);
+            // Over, whoever answered it: the other screen (the phone answered
+            // a scry) must stop showing it.
+            JsonObject done = msg("answered");
+            done.addProperty("id", id);
+            send(done);
         }
     }
 
     /** Questions sent and not yet answered, by id — see {@link #catchUp}. */
     private final Map<Integer, String> openAsks = new ConcurrentHashMap<>();
+
+    /** Forge's event-to-sound mapping, for our seat (created on first use). */
+    private forge.sound.EventVisualizer soundVisualizer;
 
     /** Set when this game is being replaced by a new one: it goes quiet. */
     private volatile boolean retired;
@@ -1823,6 +1834,29 @@ public class BridgeGui extends AbstractGuiGame {
 
         if (event instanceof GameEventTurnPhase tp) {
             sendPhase(tp);
+        }
+
+        // The sound Forge itself would play for this event (a land, a tap, a
+        // creature dying), chosen by its own EventVisualizer; the screen plays
+        // the file, served from Forge's res/sound (see SoundFiles).
+        try {
+            if (soundVisualizer == null && BridgeMain.currentGame != null) {
+                for (forge.game.player.Player p : BridgeMain.currentGame.getPlayers()) {
+                    if (BridgeMain.SEAT.equals(p.getName())) {
+                        soundVisualizer = new forge.sound.EventVisualizer(p.getLobbyPlayer());
+                    }
+                }
+            }
+            if (soundVisualizer != null) {
+                forge.sound.SoundEffectType fx = event.visit(soundVisualizer);
+                if (fx != null && fx.getResourceFileName() != null) {
+                    JsonObject s = msg("sound");
+                    s.addProperty("file", fx.getResourceFileName());
+                    send(s);
+                }
+            }
+        } catch (RuntimeException e) {
+            // A sound is never worth an event.
         }
 
         // Exiled with one of ours: remembered once the exile has resolved, and
