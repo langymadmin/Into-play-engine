@@ -472,7 +472,13 @@ public final class BridgeServer {
                 // is a message ({"t":"start"}), never a side effect of a
                 // connection.
                 forge.game.Game running = BridgeMain.currentGame;
-                if (gui != null && started.get() && running != null && !running.isGameOver()) {
+                // "Begun", not "Forge has a game object": through the coin toss
+                // and the mulligans there is none yet (or currentGame is still
+                // the last, finished one), and a reload there used to deal a
+                // second game beside the first — leaving a phone that joined
+                // later looking at the wrong one.
+                boolean live = gui != null && started.get() && !gui.hasEnded();
+                if (live) {
                     System.out.println("client reconnected to the running game");
                     for (String m : gui.catchUp()) {
                         ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
@@ -817,8 +823,8 @@ public final class BridgeServer {
                 announceScreens();
                 return;
             }
-            System.out.println("client disconnected");
             if (client == ctx.channel()) {
+                System.out.println("client disconnected");
                 client = null;
             }
         }

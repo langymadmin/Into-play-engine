@@ -1155,6 +1155,7 @@ public class BridgeGui extends AbstractGuiGame {
 
     @Override
     public void finishGame() {
+        ended = true;
         // Who won, as far as the engine knows — the screen asks the player to
         // confirm it for the match log, since a game against cardboard often
         // ends at the table (they concede) rather than in the engine.
@@ -1270,6 +1271,13 @@ public class BridgeGui extends AbstractGuiGame {
 
     /** Set when this game is being replaced by a new one: it goes quiet. */
     private volatile boolean retired;
+
+    /** The game this gui spoke for has reached game over (see BridgeServer's rejoin). */
+    private volatile boolean ended;
+
+    public boolean hasEnded() {
+        return ended;
+    }
 
     /**
      * Stop speaking for this game: nothing more is sent, nothing more is
