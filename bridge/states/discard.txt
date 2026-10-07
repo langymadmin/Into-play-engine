@@ -1,0 +1,15 @@
+# Too many cards at cleanup: the discard-to-hand-size choice with a big hand.
+# Pass from main 2 and the engine asks which cards to discard.
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Forest;Island;Swamp;Mountain;Plains;Wastes;Lightning Bolt;Counterspell;Dark Ritual;Giant Growth;Llanowar Elves;Opt;Ponder;Brainstorm;Duress;Shock;Disenchant;Naturalize;Thoughtseize;Swords to Plowshares;Path to Exile;Fatal Push;Consider;Preordain;Spell Pierce;Negate;Unholy Heat
+humanbattlefield=Forest;Island;Mountain
+humanlibrary=Forest;Wastes;Swamp;Island;Plains;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN2
+removesummoningsickness=true

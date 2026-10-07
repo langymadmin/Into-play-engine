@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import forge.game.Game;
 import forge.game.ability.AbilityKey;
 import forge.game.card.Card;
+import forge.game.spellability.SpellAbility;
 import forge.game.card.CounterType;
 import forge.game.player.Player;
 import forge.game.zone.ZoneType;
@@ -80,13 +81,86 @@ final class Declarations {
             switch (what) {
                 case "life": {
                     int delta = in.has("delta") ? in.get("delta").getAsInt() : 0;
-                    if (delta < 0) {
-                        me.loseLife(-delta, false, false, null);
-                    } else if (delta > 0) {
-                        me.gainLife(delta, null, null);
+                    // "who": another seat's life (they paid life, their own
+                    // lifelink...) - otherwise ours.
+                    Player whose = me;
+                    if (in.has("who")) {
+                        for (Player p : game.getPlayers()) {
+                            if (p.getName().equals(in.get("who").getAsString())) {
+                                whose = p;
+                            }
+                        }
                     }
-                    said = (delta < 0 ? "lost " + (-delta) : "gained " + delta) + " life";
+                    if (delta < 0) {
+                        whose.loseLife(-delta, false, false, null);
+                    } else if (delta > 0) {
+                        whose.gainLife(delta, null, null);
+                    }
+                    said = (whose == me ? "" : whose.getName() + " ")
+                            + (delta < 0 ? "lost " + (-delta) : "gained " + delta) + " life";
                     break;
+                }
+                case "mana": {
+                    // Mana in our pool from outside the engine (their cardboard
+                    // gave it), or taken out. Real mana: spells pay with it.
+                    byte color = manaColor(in.has("color") ? in.get("color").getAsString() : "C");
+                    int delta = in.has("delta") ? in.get("delta").getAsInt() : 1;
+                    forge.game.mana.ManaPool pool = me.getManaPool();
+                    if (delta > 0) {
+                        Card source = blank(game, me);
+                        List<forge.game.mana.Mana> add = new java.util.ArrayList<>();
+                        for (int i = 0; i < delta; i++) {
+                            add.add(new forge.game.mana.Mana(color, source, null, me));
+                        }
+                        pool.addMana(add);
+                    } else {
+                        List<forge.game.mana.Mana> take = new java.util.ArrayList<>();
+                        for (forge.game.mana.Mana m : pool) {
+                            if (m.getColor() == color && take.size() < -delta) {
+                                take.add(m);
+                            }
+                        }
+                        pool.removeMana(take);
+                    }
+                    gui.sendBoard();
+                    return; // the pool strip shows it; nothing to say in the log
+                }
+                case "spells": {
+                    // Spells cast at the table that the engine did not see (their
+                    // cardboard): counted for storm, which reads this list.
+                    int delta = in.has("delta") ? in.get("delta").getAsInt() : 1;
+                    List<SpellAbility> cast = game.getStack().getSpellsCastThisTurn();
+                    if (delta > 0) {
+                        Player them = me;
+                        for (Player p : game.getPlayers()) {
+                            if (BridgeMain.isOffTable(p.getName())) {
+                                them = p;
+                            }
+                        }
+                        for (int i = 0; i < delta; i++) {
+                            Card c = blank(game, them);
+                            SpellAbility sa = c.getFirstSpellAbility();
+                            if (sa != null) {
+                                sa.setActivatingPlayer(them);
+                                cast.add(sa);
+                                TABLE_SPELLS.add(sa);
+                            }
+                        }
+                    } else {
+                        // Our own additions first; then the latest real one.
+                        for (int i = 0; i < -delta && !cast.isEmpty(); i++) {
+                            SpellAbility gone = null;
+                            for (int j = cast.size() - 1; j >= 0 && gone == null; j--) {
+                                if (TABLE_SPELLS.contains(cast.get(j))) {
+                                    gone = cast.get(j);
+                                }
+                            }
+                            cast.remove(gone != null ? gone : cast.get(cast.size() - 1));
+                            TABLE_SPELLS.remove(gone);
+                        }
+                    }
+                    gui.sendBoard();
+                    return;
                 }
                 case "damage": {
                     int amount = in.has("amount") ? in.get("amount").getAsInt() : 0;
@@ -328,6 +402,21 @@ final class Declarations {
             throw new RuntimeException(e);
         }
         game.getStack().addAllTriggeredAbilitiesToStack();
+    }
+
+    /** Spells added by hand ("spells"), so taking one back removes ours first. */
+    private static final java.util.Set<SpellAbility> TABLE_SPELLS =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
+    private static byte manaColor(final String c) {
+        switch (c.toUpperCase()) {
+            case "W": return forge.card.MagicColor.WHITE;
+            case "U": return forge.card.MagicColor.BLUE;
+            case "B": return forge.card.MagicColor.BLACK;
+            case "R": return forge.card.MagicColor.RED;
+            case "G": return forge.card.MagicColor.GREEN;
+            default: return forge.card.MagicColor.COLORLESS;
+        }
     }
 
     private static Card blank(final Game game, final Player owner) {

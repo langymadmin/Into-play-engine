@@ -577,6 +577,11 @@ public class BridgeGui extends AbstractGuiGame {
         if (game != null && game.getDayTime() != null) {
             o.addProperty("dayTime", game.isDay() ? "day" : "night");
         }
+        // Every spell cast this turn, by anyone (storm's count) - including
+        // the ones declared from the table's cardboard (Declarations "spells").
+        if (game != null) {
+            o.addProperty("spellsTable", game.getStack().getSpellsCastThisTurn().size());
+        }
         o.addProperty("offTable", offTableSeat);
         o.add("opponents", opponentsJson());
         if (versus) {
