@@ -1099,10 +1099,13 @@ public class PhaseHandler implements java.io.Serializable, IHasForgeLog {
                     game.copyLastState();
                 }
                 loopCount++;
-            } while (loopCount < 999 || !pPlayerPriority.getController().isAI());
+            } while (loopCount < pPlayerPriority.getController().getPriorityLoopLimit());
 
-            if (loopCount >= 999 && pPlayerPriority.getController().isAI()) {
-                aiLog.warn("AI looped too much with: " + chosenSa);
+            if (loopCount >= pPlayerPriority.getController().getPriorityLoopLimit()) {
+                engineLog.warn("Priority loop hit the "
+                    + pPlayerPriority.getController().getPriorityLoopLimit()
+                    + "-iteration safety cap for " + pPlayerPriority
+                    + "; forcing a priority pass. Last SA: " + chosenSa);
             }
 
             if (DEBUG_PHASES) {

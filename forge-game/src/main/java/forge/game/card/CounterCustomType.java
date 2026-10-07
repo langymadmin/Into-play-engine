@@ -4,10 +4,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashSet;
 
-import com.google.common.collect.Maps;
-
 public record CounterCustomType(String keyword) implements CounterType {
-    private static Map<String, CounterCustomType> sMap = Maps.newHashMap();
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep) and
+    // lazily populated during gameplay via CounterType.getType() for custom-named
+    // counters. A plain HashMap can corrupt under concurrent put / values() iterate.
+    // Mirrors the sibling CounterKeywordType fix in patch 18.
+    private static final Map<String, CounterCustomType> sMap = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static CounterCustomType get(String s) {
         if (!sMap.containsKey(s)) {

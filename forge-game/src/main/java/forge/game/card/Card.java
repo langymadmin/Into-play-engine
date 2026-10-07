@@ -7590,7 +7590,10 @@ public class Card extends GameEntity implements Comparable<Card>, IHasSVars, ITr
         return CardFactory.getCard(pc, owner, owner == null ? null : owner.getGame());
     }
 
-    private static final Map<PaperCard, Card> cp2card = Maps.newHashMap();
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep) and
+    // lazily populated during gameplay (merged/meld-card view rebuilds). A plain
+    // HashMap can corrupt under concurrent put.
+    private static final Map<PaperCard, Card> cp2card = new java.util.concurrent.ConcurrentHashMap<>();
     public static Card getCardForUi(IPaperCard pc) {
         if (pc instanceof PaperCard) {
             Card res = cp2card.get(pc);

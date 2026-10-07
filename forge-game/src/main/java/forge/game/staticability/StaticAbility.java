@@ -51,8 +51,9 @@ import forge.util.*;
  * The Class StaticAbility.
  */
 public class StaticAbility extends CardTraitBase implements IIdentifiable, Cloneable, Comparable<StaticAbility> {
-    private static int maxId = 0;
-    private static int nextId() { return ++maxId; }
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep).
+    private static final java.util.concurrent.atomic.AtomicInteger maxId = new java.util.concurrent.atomic.AtomicInteger(0);
+    private static int nextId() { return maxId.incrementAndGet(); }
 
     private int id;
 

@@ -48,7 +48,12 @@ public class FileSection {
     public static final Pattern COLON_KV_SEPARATOR = Pattern.compile(Pattern.quote(":"));
     private static final String BAR_PAIR_SPLITTER = Pattern.quote("|");
 
-    private static final Table<String, Pattern, Map<String, String>> parseToMapCache = HashBasedTable.create();
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep) and
+    // memoized during gameplay (StaticAbility/Trigger/AbilityFactory param parsing,
+    // AnimateAi). A bare HashBasedTable is not thread-safe; wrap it so concurrent
+    // get/put can't corrupt the backing maps.
+    private static final Table<String, Pattern, Map<String, String>> parseToMapCache =
+            com.google.common.collect.Tables.synchronizedTable(HashBasedTable.create());
 
     /**
      * Parses the key=value text line and return a HashMap

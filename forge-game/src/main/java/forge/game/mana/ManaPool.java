@@ -87,6 +87,41 @@ public class ManaPool extends ManaConversionMatrix implements Iterable<Mana> {
      * </p>
      */
     public final boolean willManaBeLostAtEndOfPhase() {
+        return anyManaWouldBeCleared(owner.getGame().getPhaseHandler().is(PhaseType.CLEANUP));
+    }
+
+    /**
+     * <p>
+     * willManaBeLostAtCleanup.
+     *
+     * @return - whether floating mana will be lost once the cleanup step empties
+     * the pool, i.e. ignoring the persistent/combat reprieves (cleanup honours
+     * neither). Persistent mana (Birgi, Neheb) survives the END of the end step
+     * yet is emptied at cleanup, and no player receives priority in between
+     * (CR 514.3) — so a caller asking "does passing priority right now cost this
+     * player their mana?" at the end step must ask THIS question, not
+     * {@link #willManaBeLostAtEndOfPhase()}.
+     * </p>
+     */
+    public final boolean willManaBeLostAtCleanup() {
+        return anyManaWouldBeCleared(true);
+    }
+
+    /**
+     * Whether any floating Mana would be emptied by {@code clearPool(true)} run
+     * with the given cleanup-step assumption. Mirrors clearPool's keep-rules
+     * EXACTLY, so these predicates agree with the emptying they are predicting.
+     * Three ways a floating Mana survives:
+     *   - its COLOR is kept wholesale (StaticAbilityUnspentMana — Omnath,
+     *     Kruphix, ...), which clearPool applies via keys.removeAll(...);
+     *   - it is PERSISTENT mana (Birgi, Neheb, ...), kept until cleanup;
+     *   - it is COMBAT mana (Savage Ventmaw, ...), kept until end of combat.
+     * The last two were the unimplemented "TODO isPersistentMana": the old
+     * colour-only count reported "mana will be lost" for mana clearPool goes on
+     * to keep, so any consumer gating on the predicate fired spuriously for the
+     * whole turn a persistent-mana source had been used.
+     */
+    private boolean anyManaWouldBeCleared(final boolean cleanup) {
         if (floatingMana.isEmpty()) {
             return false;
         }
@@ -96,14 +131,22 @@ public class ManaPool extends ManaConversionMatrix implements Iterable<Mana> {
             return false;
         }
 
-        int safeMana = 0;
-        for (final byte c : StaticAbilityUnspentMana.getManaToKeep(owner)) {
-            safeMana += getAmountOfColor(c);
+        final Collection<Byte> keptColors = StaticAbilityUnspentMana.getManaToKeep(owner);
+        final boolean combatEnd = owner.getGame().getPhaseHandler().is(PhaseType.COMBAT_END);
+
+        for (final Mana mana : floatingMana.values()) {
+            if (keptColors.contains(mana.getColor())) {
+                continue;
+            }
+            if (!cleanup && mana.isPersistentMana()) {
+                continue;
+            }
+            if (!cleanup && mana.isCombatMana() && !combatEnd) {
+                continue;
+            }
+            return true; // this mana really would be emptied
         }
-
-        // TODO isPersistentMana
-
-        return totalMana() != safeMana; //won't lose floating mana if all mana is of colors that aren't going to be emptied
+        return false;
     }
 
     public final boolean hasBurn() {

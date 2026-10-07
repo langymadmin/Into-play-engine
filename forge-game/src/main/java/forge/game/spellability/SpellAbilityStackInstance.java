@@ -38,8 +38,9 @@ import forge.util.TextUtil;
  * @version $Id$
  */
 public class SpellAbilityStackInstance implements IIdentifiable, IHasCardView {
-    private static int maxId = 0;
-    public static int nextId() { return ++maxId; }
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep).
+    private static final java.util.concurrent.atomic.AtomicInteger maxId = new java.util.concurrent.atomic.AtomicInteger(0);
+    public static int nextId() { return maxId.incrementAndGet(); }
 
     // At some point I want this functioning more like Target/Target Choices
     // where the SA has an "active"

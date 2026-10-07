@@ -916,7 +916,8 @@ public final class CardType implements Comparable<CardType>, CardTypeView {
         return CoreType.allCoreTypeNames;
     }
 
-    private static List<String> sortedSubTypes;
+    // volatile: built lazily and shared across games in one JVM (endstep 18).
+    private static volatile List<String> sortedSubTypes;
     public static List<String> getSortedSubTypes() {
         if (sortedSubTypes == null) {
             // TreeSet sorts and drops duplicates (some types appear in two sections, e.g. Spacecraft);

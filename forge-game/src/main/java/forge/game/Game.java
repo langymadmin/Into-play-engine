@@ -64,8 +64,9 @@ public class Game {
 
     private static final TaggedLogger netLog = Logger.tag("NETWORK");
 
-    private static int maxId = 0;
-    private static int nextId() { return ++maxId; }
+    // Thread-safe: shared across concurrent game threads in one JVM (Endstep).
+    private static final java.util.concurrent.atomic.AtomicInteger maxId = new java.util.concurrent.atomic.AtomicInteger(0);
+    private static int nextId() { return maxId.incrementAndGet(); }
 
     private boolean noGUIUser;
 
@@ -1053,7 +1054,119 @@ public class Game {
     }
 
     private int cardIdCounter = 0, hiddenCardIdCounter = 0;
+
+    // ------------------------------------------------------------------
+    // Endstep patch 24 — runaway-game soft cap (documented divergence;
+    // precedent: patch 21's priority-loop cap). Desktop Forge hosts ONE
+    // game per JVM, so an infinite intra-resolution loop (token flood,
+    // mandatory-trigger cascade) merely hangs that user's machine. A
+    // headless multi-tenant host runs many games on one shared heap with
+    // -XX:+ExitOnOutOfMemoryError, so the same loop kills EVERY co-tenant
+    // game. Patch 21 bounds the PRIORITY loop only; these per-turn counters
+    // bound the intra-resolution loops that never return to priority (each
+    // created Card mints an id through nextCardId(); each waiting-trigger
+    // fire passes recordTriggerFired()). Past the cap the game is
+    // force-ended as a real GameEndReason.Draw via the engine's OWN
+    // setGameOver path — no invented outcome — then RunawayGameException
+    // unwinds the game thread. The Draw is recorded BEFORE the throw so
+    // even a broad catch that swallows the exception re-enters the guard
+    // on its next allocation and re-throws: strong termination pressure.
+    //
+    // Calibration (false-positive draw on a legitimate big turn is the key
+    // hazard): the default cap is 25,000 per turn — a huge real storm/token
+    // turn is low THOUSANDS of objects/trigger-fires, so the cap sits an
+    // order of magnitude above any legitimate game, yet 25k Cards is far
+    // below 3g-heap exhaustion. Tunable at boot without a rebuild
+    // (forge.runaway-cards-per-turn / forge.runaway-triggers-per-turn via
+    // the hosting service); set to Integer.MAX_VALUE (or <= 0) to disable.
+    //
+    // All counters are per-Game INSTANCE state (no new shared statics —
+    // the patch 16-20 hazard class); the two config caps are write-once
+    // boot values, volatile for safe publication.
+
+    /** Unwinds a game force-ended as a Draw by the runaway soft cap. */
+    public static class RunawayGameException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        public RunawayGameException(final String message) {
+            super(message);
+        }
+    }
+
+    /** Default per-turn cap for both guarded quantities. See the
+     *  calibration note above. */
+    public static final int DEFAULT_RUNAWAY_CAP_PER_TURN = 25_000;
+
+    private static volatile int runawayCardsPerTurnCap = DEFAULT_RUNAWAY_CAP_PER_TURN;
+    private static volatile int runawayTriggersPerTurnCap = DEFAULT_RUNAWAY_CAP_PER_TURN;
+
+    public static void setRunawayCardsPerTurnCap(final int cap) {
+        runawayCardsPerTurnCap = cap > 0 ? cap : Integer.MAX_VALUE;
+    }
+    public static void setRunawayTriggersPerTurnCap(final int cap) {
+        runawayTriggersPerTurnCap = cap > 0 ? cap : Integer.MAX_VALUE;
+    }
+
+    private int runawayTurnStamp = -1;
+    private int cardsCreatedThisTurn = 0;
+    private int triggersFiredThisTurn = 0;
+    /** True once this game tripped a cap — subsequent over-cap calls throw
+     *  without re-running the (already-completed) game-over path. */
+    private boolean runawayTripped = false;
+    /** Suppresses the guard while setGameOver(Draw) is finalizing, so an
+     *  allocation made by game-over processing itself cannot throw from
+     *  inside setGameOver and abort the outcome recording. */
+    private boolean runawayFinalizing = false;
+
+    private void resetRunawayWindowOnTurnChange() {
+        final int turnNow = getPhaseHandler().getTurn();
+        if (turnNow != runawayTurnStamp) {
+            runawayTurnStamp = turnNow;
+            cardsCreatedThisTurn = 0;
+            triggersFiredThisTurn = 0;
+        }
+    }
+
+    private void checkRunawayCap(final int count, final int cap, final String what) {
+        if (count <= cap || runawayFinalizing) {
+            return;
+        }
+        if (!runawayTripped) {
+            runawayTripped = true;
+            Logger.tag("ENGINE").warn("Runaway-game soft cap hit: {} {} on turn {} (cap {});"
+                    + " forcing a Draw to protect co-tenant games.", count, what, runawayTurnStamp, cap);
+            runawayFinalizing = true;
+            try {
+                // Mirror the engine's OWN draw path, GameDrawEffect.resolve():
+                // every in-game player records an intentional draw, then the
+                // game ends with GameEndReason.Draw. Without the per-player
+                // outcomes, GameOutcome.isDraw() (which derives from player
+                // stats, not the win condition) would misreport the result.
+                for (final Player p : getPlayers()) {
+                    p.intentionalDraw();
+                }
+                setGameOver(GameEndReason.Draw);
+            } finally {
+                runawayFinalizing = false;
+            }
+        }
+        throw new RunawayGameException("Runaway game: " + count + " " + what
+                + " in one turn (cap " + cap + "); game force-ended as a draw.");
+    }
+
+    /** Endstep patch 24: per-turn trigger-fire guard, fed by
+     *  TriggerHandler.runWaitingTriggers(). */
+    public void recordTriggerFired() {
+        resetRunawayWindowOnTurnChange();
+        triggersFiredThisTurn++;
+        checkRunawayCap(triggersFiredThisTurn, runawayTriggersPerTurnCap, "triggers fired");
+    }
+    // ---- end Endstep patch 24 ----
+
     public int nextCardId() {
+        // Endstep patch 24: per-turn card-creation guard (see above).
+        resetRunawayWindowOnTurnChange();
+        cardsCreatedThisTurn++;
+        checkRunawayCap(cardsCreatedThisTurn, runawayCardsPerTurnCap, "cards created");
         return ++cardIdCounter;
     }
     public int nextHiddenCardId() {

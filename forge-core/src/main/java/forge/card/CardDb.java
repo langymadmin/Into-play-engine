@@ -68,7 +68,11 @@ public final class CardDb implements ICardDatabase, IDeckGenPool {
     private final CardEdition.Collection editions;
     private final Set<String> filtered;
 
-    private final Map<String, Boolean> nonLegendaryCreatureNames = Maps.newHashMap();
+    // Thread-safe: this CardDb (StaticData.commonCards) is shared across all concurrent
+    // games in one JVM (Endstep); this is a read-through cache written DURING gameplay
+    // (isNonLegendaryCreatureName, on changeling / shares-a-name checks). A plain HashMap
+    // can corrupt under concurrent put.
+    private final Map<String, Boolean> nonLegendaryCreatureNames = new java.util.concurrent.ConcurrentHashMap<>();
 
     public enum CardArtPreference implements Comparator<CardEdition> {
         LATEST_ART_ALL_EDITIONS(false, true),

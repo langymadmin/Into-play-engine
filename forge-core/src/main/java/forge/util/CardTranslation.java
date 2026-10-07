@@ -94,7 +94,7 @@ public class CardTranslation {
 
     private static String translateTokenName(String name) {
         if (translatedTokenNames == null)
-            translatedTokenNames = new HashMap<>();
+            translatedTokenNames = new java.util.concurrent.ConcurrentHashMap<>();
         String ttype = translatedTokenNames.get(name);
         if (ttype == null) {
             String sub = name.replace(" Token", "");
@@ -113,7 +113,7 @@ public class CardTranslation {
 
     private static String translateKnownEffectNames(String name) {
         if (translatedEffectNames == null)
-            translatedEffectNames = new HashMap<>();
+            translatedEffectNames = new java.util.concurrent.ConcurrentHashMap<>();
         String fname = translatedEffectNames.get(name);
         if (fname == null) {
             switch (name) {
@@ -147,7 +147,7 @@ public class CardTranslation {
 
     private static String translateEffectNames(String name) {
         if (translatedEffectNames == null)
-            translatedEffectNames = new HashMap<>();
+            translatedEffectNames = new java.util.concurrent.ConcurrentHashMap<>();
         String fname = translatedEffectNames.get(name);
         if (fname == null) {
             String finalname = name.replaceAll("\\([^()]*\\)", "");
@@ -278,7 +278,8 @@ public class CardTranslation {
             translatednames = new HashMap<>();
             translatedtypes = new HashMap<>();
             translatedoracles = new HashMap<>();
-            oracleMappings = new HashMap<>();
+            // Memoized during gameplay and shared across games in one JVM (endstep 18).
+            oracleMappings = new ConcurrentHashMap<>();
             // read from the game thread and the EDT both, and computeIfAbsent on a plain
             // HashMap is not safe under that
             translatedCaches = new ConcurrentHashMap<>();

@@ -24,7 +24,13 @@ public class AiCache {
     // for that you can pass Functions that compare the args
     public static <T> T getCached(String key, Supplier<T> func, List<BiFunction<Object, Object, Boolean>> argsCheck, Object... args) {
         // TODO would like a good strategy to derive default key, but there's no clean way to obtain the method name
-        for (List<Object> cached : Lists.newArrayList(dataMap.get(key))) {
+        // dataMap is shared across games in one JVM: copying its view iterates it,
+        // which Guava's synchronizedMultimap requires under its lock (endstep 19).
+        List<List<Object>> snapshot;
+        synchronized (dataMap) {
+            snapshot = Lists.newArrayList(dataMap.get(key));
+        }
+        for (List<Object> cached : snapshot) {
             boolean hit = true;
             for (int i = 0; i < args.length; i++) {
                 BiFunction<Object, Object, Boolean> checker = argsCheck == null ? Object::equals : argsCheck.get(i);

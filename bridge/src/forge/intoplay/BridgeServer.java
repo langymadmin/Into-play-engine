@@ -345,6 +345,8 @@ public final class BridgeServer {
                                 // match silently dropped any query string.
                                 .addLast(new WebSocketServerProtocolHandler("/play", null, true, 1 << 20, false, true))
                                 // Forge's sound effects for the screen (GET /sound/x.mp3).
+                                // The metagame for "What are they playing?" (GET /meta/...).
+                                .addLast(new MetaService())
                                 .addLast(new SoundFiles())
                                 .addLast(new Handler());
                     }

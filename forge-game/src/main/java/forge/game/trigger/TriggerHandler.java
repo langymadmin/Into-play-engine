@@ -278,6 +278,12 @@ public class TriggerHandler {
 
         boolean haveWaiting = false;
         for (final TriggerWaiting wt : waiting) {
+            // Endstep patch 24: count waiting-trigger fires toward the
+            // per-turn runaway soft cap — an unbounded mandatory-trigger
+            // cascade never returns to the priority loop patch 21 bounds.
+            // Throws Game.RunawayGameException past the cap (game already
+            // force-ended as a Draw). See Game.recordTriggerFired().
+            game.recordTriggerFired();
             haveWaiting |= runWaitingTrigger(wt);
         }
 

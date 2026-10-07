@@ -88,6 +88,20 @@ public abstract class PlayerController {
         return false;
     }
 
+    /**
+     * Hard ceiling on consecutive iterations of PhaseHandler.mainLoopStep()'s
+     * priority loop before the engine force-passes priority for this controller —
+     * a safety valve against a non-terminating priority loop (e.g. an
+     * infinite-token combo). Forge's AI is bounded at 999 so it cannot spin on a
+     * degenerate loop; a live desktop human is effectively unbounded because a
+     * real person simply stops. Headless/remote controllers whose "player" may be
+     * a bot or an autopiloted disconnected seat OVERRIDE this to opt into a finite
+     * cap. Return {@link Integer#MAX_VALUE} for "no cap".
+     */
+    public int getPriorityLoopLimit() {
+        return isAI() ? 999 : Integer.MAX_VALUE;
+    }
+
     public Game getGame() { return gameView.getGame(); }
     public Match getMatch() { return gameView.getMatch(); }
     public Player getPlayer() { return player; }

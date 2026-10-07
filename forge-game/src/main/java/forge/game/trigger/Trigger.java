@@ -52,16 +52,25 @@ import java.util.*;
  * @version $Id$
  */
 public abstract class Trigger extends TriggerReplacementBase {
-    private static int maxId = 0;
-    private static int nextId() { return ++maxId; }
+    // Thread-safe + monotonic: Endstep runs many games concurrently in one JVM,
+    // so this counter is shared across game threads. A non-atomic ++ races (lost
+    // updates), and resetIDs() rewinding it under a live game makes a freshly
+    // minted trigger reuse an id still in play — and Trigger.equals/hashCode
+    // below are purely id-based, so the duplicate de-registers the wrong trigger
+    // (silent trigger drop). Base 50000 preserves the original id range.
+    private static final java.util.concurrent.atomic.AtomicInteger maxId = new java.util.concurrent.atomic.AtomicInteger(50000);
+    private static int nextId() { return maxId.incrementAndGet(); }
 
     /**
      * <p>
      * resetIDs.
      * </p>
+     * Intentionally a no-op. Forge (single-game desktop) rewound this per game;
+     * with concurrent games sharing the counter, rewinding collides live ids.
+     * The counter stays monotonic instead — ids remain unique across all games.
      */
     public static void resetIDs() {
-        Trigger.maxId = 50000;
+        // no-op — see field comment
     }
 
     /** The ID. */
