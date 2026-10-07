@@ -630,6 +630,9 @@ public class BridgeGui extends AbstractGuiGame {
             m.addProperty("C", pool.getAmountOfColor(forge.card.MagicColor.COLORLESS));
             s.add("mana", m);
         }
+        // For the screen's mana strip: this turn's (storm, prowess) and the game's.
+        s.addProperty("spellsTurn", p.getSpellsCastThisTurn());
+        s.addProperty("spellsGame", p.getSpellsCastThisGame());
         com.google.common.collect.Multiset<forge.game.card.CounterType> ctrs = p.getCounters();
         if (ctrs != null && !ctrs.isEmpty()) {
             JsonObject c = new JsonObject();
