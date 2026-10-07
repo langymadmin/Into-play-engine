@@ -867,6 +867,21 @@ public final class BridgeMain {
             // sent. The board's green glow is that report.
             human.getYieldController().setPref(
                     forge.localinstance.properties.ForgePreferences.FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
+            // The off-table seats keep passing even while our spell is on the
+            // stack: their response happens at the table, and is declared
+            // ("They respond…" → Their effect). Forge's own interrupts would
+            // stop and ask the tablet for them at every spell.
+            if (isOffTable(p.getName())) {
+                for (forge.localinstance.properties.ForgePreferences.FPref pref : List.of(
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL,
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_TARGETING,
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_TRIGGERS,
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL,
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_ATTACKERS,
+                        forge.localinstance.properties.ForgePreferences.FPref.YIELD_INTERRUPT_ON_REVEAL)) {
+                    human.getYieldController().setPref(pref, "false");
+                }
+            }
             // Twice, and in this order: the first clears whatever view the gui
             // held from a previous game so the second does not copy into stale
             // state. Forge does the same and the comment there says why.

@@ -180,6 +180,15 @@ final class Declarations {
                     said = card.getName() + (n > 0 ? " got " : " lost ") + Math.abs(n) + " " + type.getName() + " counter(s)";
                     break;
                 }
+                // Day or night, set by hand: their spells are cardboard, so the
+                // engine cannot count them for the day/night rule.
+                // (Forge's flag reads backwards: false is day, true is night.)
+                case "daynight": {
+                    boolean night = in.has("to") && "night".equals(in.get("to").getAsString());
+                    game.setDayTime(night);
+                    said = "it is " + (night ? "night" : "day");
+                    break;
+                }
                 // Their Threads of Disloyalty / Act of Treason / Control Magic:
                 // one of ours changes control (and comes back from "Their
                 // table", where it is then listed). See TheirSide.take.

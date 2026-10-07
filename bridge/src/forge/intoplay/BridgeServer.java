@@ -107,6 +107,24 @@ public final class BridgeServer {
         if (c != null && c.isActive()) {
             c.writeAndFlush(new TextWebSocketFrame(json));
         }
+        // That player's phone, holding their hand.
+        handSeat.forEach((ch, s) -> {
+            if (s.equals(seat) && ch.isActive()) {
+                ch.writeAndFlush(new TextWebSocketFrame(json));
+            }
+        });
+    }
+
+    /** Versus: each phone and the player whose hand it holds. */
+    private final java.util.Map<Channel, String> handSeat = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Versus: tell a player's tablet how many phones hold their hand. */
+    private void announceSeatScreens(final String seat) {
+        long n = handSeat.values().stream().filter(seat::equals).count();
+        Channel c = seatChannels.get(seat);
+        if (c != null && c.isActive()) {
+            c.writeAndFlush(new TextWebSocketFrame("{\"t\":\"screens\",\"hands\":" + n + "}"));
+        }
     }
 
     private static String nameOf(final JsonObject setup, final String fallback) {
@@ -228,6 +246,7 @@ public final class BridgeServer {
         seatGuis.clear();
         seatChannels.clear();
         channelSeat.clear();
+        handSeat.clear();
         started.set(false);
     }
 
@@ -381,6 +400,24 @@ public final class BridgeServer {
                 // Before the tablet has started anything it simply waits: the
                 // game's messages reach it when there is a game.
                 if (hs.requestUri() != null && hs.requestUri().contains("role=hand")) {
+                    // Versus: the phone of one player ("seat=Name") joins that
+                    // player's seat and hears only what that player may see.
+                    java.util.regex.Matcher hm = java.util.regex.Pattern.compile("[?&]seat=([^&]+)").matcher(hs.requestUri());
+                    if (hm.find()) {
+                        String seat = java.net.URLDecoder.decode(hm.group(1), java.nio.charset.StandardCharsets.UTF_8);
+                        BridgeGui sg = seatGuis.get(seat);
+                        if (sg != null) {
+                            handSeat.put(ctx.channel(), seat);
+                            channelSeat.put(ctx.channel(), seat);
+                            System.out.println("versus: " + seat + "'s phone joined");
+                            for (String m : sg.catchUp()) {
+                                ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
+                            }
+                            announceSeatScreens(seat);
+                            super.userEventTriggered(ctx, evt);
+                            return;
+                        }
+                    }
                     joined.add(ctx.channel());
                     System.out.println("hand screen joined");
                     announceScreens();
@@ -765,6 +802,12 @@ public final class BridgeServer {
         @Override
         public void channelInactive(final ChannelHandlerContext ctx) {
             channelSeat.remove(ctx.channel());
+            String phoneOf = handSeat.remove(ctx.channel());
+            if (phoneOf != null) {
+                System.out.println("versus: " + phoneOf + "'s phone left");
+                announceSeatScreens(phoneOf);
+                return;
+            }
             if (joined.remove(ctx.channel())) {
                 System.out.println("hand screen disconnected");
                 announceScreens();
