@@ -215,6 +215,17 @@ public final class BridgeMain {
                     // tablet just before this runs (CardboardBlocks). Forge's own
                     // InputBlock would ask that seat again, about stand-ins it
                     // already has, on a screen nobody on that side is holding.
+                    // Their attacks happen at the table, with cardboard; what
+                    // reaches us is declared ("Their effect…" → take damage).
+                    // In the engine their turn has no attackers.
+                    @Override
+                    public void declareAttackers(final Player attackingPlayer, final forge.game.combat.Combat combat) {
+                        if (isOffTable(p.getName())) {
+                            return;
+                        }
+                        super.declareAttackers(attackingPlayer, combat);
+                    }
+
                     @Override
                     public void declareBlockers(final Player defender, final forge.game.combat.Combat combat) {
                         if (isOffTable(p.getName())) {
@@ -615,11 +626,17 @@ public final class BridgeMain {
                 //
                 // ActiveZones$ Command for the same reason the static needs
                 // EffectZone: a command-zone card is inert otherwise.
-                "R:Event$ BeginTurn | ActiveZones$ Command | ValidPlayer$ You | Skip$ True "
-                        + "| Description$ This seat's turns happen at the table, not in the engine.",
-                // Still worth keeping even though no draw step ever arrives for
-                // this seat: a spell can tell it to draw, and its library is
-                // not real either.
+                //
+                // NO LONGER SKIPPED (2026-10): their turn runs, auto-passed, so
+                // "at the beginning of each upkeep", "each end step" and
+                // "during an opponent's turn" happen when they should. It costs
+                // nothing to watch: the seat yields every step, nobody is woken
+                // but at their end step (the "their turn" window) or when
+                // something triggers — see BridgeGui.isUiSetToSkipPhase. The
+                // seat never attacks in the engine (its creatures are
+                // cardboard); see declareAttackers in lobbyPlayer.
+                //
+                // Their draws stay blocked: their cards are on the table.
                 "S:Mode$ CantDraw | ValidPlayer$ You | EffectZone$ Command "
                         + "| Description$ This seat's cards are on the table, not in the engine.",
                 "Oracle:");

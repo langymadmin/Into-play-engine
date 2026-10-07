@@ -993,7 +993,29 @@ public class BridgeGui extends AbstractGuiGame {
      */
     @Override
     public boolean isUiSetToSkipPhase(final PlayerView playerTurn, final PhaseType phase) {
+        // Their turn: one window, at their end step, unless the screen asked
+        // for more ("theirSteps"). Something on the stack still wakes us —
+        // Forge only skips a step whose stack is empty.
+        if (playerTurn != null && BridgeMain.isOffTable(playerTurn.getName())) {
+            return !theirStops.contains(phase);
+        }
         return !stops.isEmpty() && !stops.contains(phase);
+    }
+
+    /** The steps of THEIR turn to be woken at; their end step by default. */
+    private final java.util.Set<PhaseType> theirStops =
+            java.util.EnumSet.of(PhaseType.END_OF_TURN);
+
+    /** Replace their-turn stops. Empty means none — straight through. */
+    public void setTheirStops(final Iterable<String> names) {
+        theirStops.clear();
+        for (String n : names) {
+            try {
+                theirStops.add(PhaseType.valueOf(n));
+            } catch (IllegalArgumentException e) {
+                System.out.println("unknown phase in their stop list: " + n);
+            }
+        }
     }
 
     /** The steps the client has asked to be woken at; empty means all of them. */
@@ -1005,6 +1027,8 @@ public class BridgeGui extends AbstractGuiGame {
         if (old != null) {
             stops.clear();
             stops.addAll(old.stops);
+            theirStops.clear();
+            theirStops.addAll(old.theirStops);
         }
     }
 
@@ -1841,12 +1865,21 @@ public class BridgeGui extends AbstractGuiGame {
         JsonObject o = msg("highlight");
         o.addProperty("on", b);
         JsonArray ids = new JsonArray();
+        // Players by name: their ids are small numbers a card can share. The
+        // one case that matters is declaring attackers, where Forge lights the
+        // defender the next creature will attack — several opponents, one lit.
+        JsonArray players = new JsonArray();
         if (entities != null) {
             for (GameEntityView e : entities) {
-                ids.add(e.getId());
+                if (e instanceof PlayerView pv) {
+                    players.add(pv.getName());
+                } else {
+                    ids.add(e.getId());
+                }
             }
         }
         o.add("ids", ids);
+        o.add("players", players);
         send(o);
     }
 

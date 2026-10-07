@@ -470,6 +470,14 @@ public final class BridgeServer {
                     }
                     g.setStops(names);
                     System.out.println("stops: " + names);
+                    if (in.has("theirSteps")) {
+                        java.util.List<String> theirs = new java.util.ArrayList<>();
+                        for (com.google.gson.JsonElement e : in.getAsJsonArray("theirSteps")) {
+                            theirs.add(e.getAsString());
+                        }
+                        g.setTheirStops(theirs);
+                        System.out.println("their stops: " + theirs);
+                    }
                     break;
                 }
                 // Aim the spell at something the engine cannot see. The whole
