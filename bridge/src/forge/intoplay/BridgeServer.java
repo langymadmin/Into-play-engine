@@ -157,6 +157,49 @@ public final class BridgeServer {
         port = port0;
         onReady = onReady0;
         startOnConnect = startOnConnect0;
+        current = this;
+        System.out.println("room " + ROOM + " · code " + CODE);
+    }
+
+    // ------------------------------------------------------------------
+    // Room and code: how a second device finds and is let into this table.
+    // ------------------------------------------------------------------
+    //
+    // A friend joining a two-player game, or a phone opening its hand, types
+    // the room and the code on the landing page (no camera, no long link).
+    // Both are four digits, made when the engine starts and kept while it
+    // runs. The room says which table; the code is the key: a join, or a
+    // phone, without it is turned away. Only the table screen is told the
+    // code ({"t":"room"}); /room/check only answers yes or no.
+
+    private static final java.security.SecureRandom RNG = new java.security.SecureRandom();
+    static final String ROOM = String.valueOf(1000 + RNG.nextInt(9000));
+    static final String CODE = String.format("%04d", RNG.nextInt(10000));
+    static volatile BridgeServer current;
+
+    private static String roomJson() {
+        return "{\"t\":\"room\",\"room\":\"" + ROOM + "\",\"code\":\"" + CODE + "\"}";
+    }
+
+    /** A URI or message carrying the right code ("code=1234" / {"code":"1234"}). */
+    static boolean codeIn(final String uri) {
+        return uri != null && uri.matches(".*[?&]code=" + CODE + "(&.*)?$");
+    }
+
+    /** For /room/check: is this the room, is the code right, and what is there to join. */
+    static JsonObject check(final String room, final String code) {
+        JsonObject o = new JsonObject();
+        boolean ok = ROOM.equals(room) && CODE.equals(code);
+        o.addProperty("ok", ok);
+        if (ok && current != null) {
+            o.addProperty("lobby", current.versusHost != null);
+            forge.game.Game g = BridgeMain.currentGame;
+            o.addProperty("game", current.started.get() && current.gui != null && !current.gui.hasEnded() && g != null);
+            if (current.versusHost != null) {
+                o.addProperty("host", nameOf(current.versusHost, "Player 1"));
+            }
+        }
+        return o;
     }
 
     /**
@@ -404,6 +447,13 @@ public final class BridgeServer {
                 // Before the tablet has started anything it simply waits: the
                 // game's messages reach it when there is a game.
                 if (hs.requestUri() != null && hs.requestUri().contains("role=hand")) {
+                    // A phone only with the room's code (in its pairing link, or
+                    // typed on the landing page).
+                    if (!codeIn(hs.requestUri())) {
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"code\",\"hand\":true}"));
+                        super.userEventTriggered(ctx, evt);
+                        return;
+                    }
                     // Versus: the phone of one player ("seat=Name") joins that
                     // player's seat and hears only what that player may see.
                     java.util.regex.Matcher hm = java.util.regex.Pattern.compile("[?&]seat=([^&]+)").matcher(hs.requestUri());
@@ -421,6 +471,14 @@ public final class BridgeServer {
                             super.userEventTriggered(ctx, evt);
                             return;
                         }
+                    }
+                    // Two players: a phone must say whose hand it is (its seat,
+                    // from that player's own "Pair a phone"); without one it
+                    // would hear the host's hand.
+                    if (!seatGuis.isEmpty()) {
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"seat\",\"hand\":true}"));
+                        super.userEventTriggered(ctx, evt);
+                        return;
                     }
                     joined.add(ctx.channel());
                     System.out.println("hand screen joined");
@@ -443,6 +501,7 @@ public final class BridgeServer {
                         seatChannels.put(seat, ctx.channel());
                         channelSeat.put(ctx.channel(), seat);
                         System.out.println("versus: " + seat + " reconnected");
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame(roomJson()));
                         for (String m : sg.catchUp()) {
                             ctx.channel().writeAndFlush(new TextWebSocketFrame(m));
                         }
@@ -453,7 +512,9 @@ public final class BridgeServer {
                 // Versus: the host is waiting for a second player — this screen
                 // may be that player. It is shown the lobby; nothing starts.
                 if (versusHost != null && ctx.channel() != versusHostChannel) {
-                    ctx.channel().writeAndFlush(new TextWebSocketFrame(lobbyJson(false)));
+                    // ...with the code. Without it: asked for the room and code.
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(codeIn(uri) ? lobbyJson(false)
+                            : "{\"t\":\"denied\",\"why\":\"code\",\"lobby\":true}"));
                     super.userEventTriggered(ctx, evt);
                     return;
                 }
@@ -465,7 +526,6 @@ public final class BridgeServer {
                     super.userEventTriggered(ctx, evt);
                     return;
                 }
-                client = ctx.channel();
                 // A game is already running: this is the tablet coming back —
                 // a reload, a screen that slept, a dropped Wi-Fi. Rejoin it,
                 // as the phone does, rather than dealing a new one; "New game"
@@ -478,6 +538,16 @@ public final class BridgeServer {
                 // second game beside the first — leaving a phone that joined
                 // later looking at the wrong one.
                 boolean live = gui != null && started.get() && !gui.hasEnded();
+                // A running game is only rejoined with the code — the table
+                // that started it keeps it and sends it back; anyone else who
+                // opens the address is asked for it rather than taking over.
+                if (live && !codeIn(uri)) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"code\",\"game\":true}"));
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
+                client = ctx.channel();
+                ctx.channel().writeAndFlush(new TextWebSocketFrame(roomJson()));
                 if (live) {
                     System.out.println("client reconnected to the running game");
                     for (String m : gui.catchUp()) {
@@ -532,6 +602,12 @@ public final class BridgeServer {
             final String t = in.has("t") ? in.get("t").getAsString() : "";
             // The second player joining a waiting versus game.
             if ("join".equals(t)) {
+                // Only with the room's code (typed on the landing page, or in
+                // the host's link).
+                if (!(in.has("code") && CODE.equals(in.get("code").getAsString()))) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"code\"}"));
+                    return;
+                }
                 joinVersus(ctx.channel(), in);
                 return;
             }

@@ -66,7 +66,25 @@ final class AppFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
         Path root = dir;
         // "Is this page the engine's?" - the app asks, so its homepage can
         // send a chosen deck to the engine's table instead of a Firebase game.
-        if ("/engine.json".equals(uri)) {
+        // The landing page's "Enter room and code": yes or no, and whether
+        // there is a game or a waiting player to join. Never the code itself.
+        if ("/room/check".equals(uri)) {
+            java.util.Map<String, String> qs = new java.util.HashMap<>();
+            String raw = req.uri().contains("?") ? req.uri().substring(req.uri().indexOf('?') + 1) : "";
+            for (String kv : raw.split("&")) {
+                int eq = kv.indexOf('=');
+                if (eq > 0) {
+                    qs.put(kv.substring(0, eq), java.net.URLDecoder.decode(kv.substring(eq + 1), java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+            res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.copiedBuffer(
+                    BridgeServer.check(qs.getOrDefault("room", "").trim(), qs.getOrDefault("code", "").trim()).toString(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            res.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+            res.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-store");
+            root = null;
+        }
+        if (res == null && "/engine.json".equals(uri)) {
             res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK,
                     Unpooled.copiedBuffer("{\"engine\":true}", java.nio.charset.StandardCharsets.UTF_8));
             res.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
