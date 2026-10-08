@@ -101,6 +101,44 @@ public final class BridgeServer {
     private final java.util.Map<String, BridgeGui> seatGuis = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<String, Channel> seatChannels = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<Channel, String> channelSeat = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The two-player game has reached its end (or failed). */
+    private volatile boolean versusOver;
+
+    /**
+     * A two-player game still being played: not over, and at least one of
+     * its players still connected. A finished or abandoned one (both screens
+     * closed) does not keep the table "full" — the next screen starts fresh.
+     */
+    private boolean versusLive() {
+        if (seatGuis.isEmpty() || versusOver) {
+            return false;
+        }
+        if (seatChannels.values().stream().anyMatch(c -> c != null && c.isActive())) {
+            return true;
+        }
+        // Nobody connected: tablets asleep, a dropped Wi-Fi, a player
+        // reloading. Kept for ten minutes, so they can come back to it.
+        return System.currentTimeMillis() - lastSeatSeen < ABANDONED_MS;
+    }
+
+    /** When a player's screen was last connected (see versusLive). */
+    private volatile long lastSeatSeen;
+    private static final long ABANDONED_MS = 10 * 60 * 1000;
+
+    private String fullJson(final boolean withSeats) {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "lobby");
+        o.addProperty("full", true);
+        o.addProperty("players", seatGuis.size());
+        // With the code: the seats, so a player on another device (or with
+        // a cleared browser) can take theirs back.
+        if (withSeats) {
+            com.google.gson.JsonArray s = new com.google.gson.JsonArray();
+            seatGuis.keySet().forEach(s::add);
+            o.add("seats", s);
+        }
+        return o.toString();
+    }
 
     private void sendSeat(final String seat, final String json) {
         Channel c = seatChannels.get(seat);
@@ -354,6 +392,7 @@ public final class BridgeServer {
         hostCh.writeAndFlush(new TextWebSocketFrame("{\"t\":\"you\",\"seat\":" + com.google.gson.JsonParser.parseString("\"" + nameA.replace("\"", "") + "\"") + "}"));
         ch.writeAndFlush(new TextWebSocketFrame("{\"t\":\"you\",\"seat\":" + com.google.gson.JsonParser.parseString("\"" + nameB.replace("\"", "") + "\"") + "}"));
         System.out.println("versus: " + nameA + " vs " + nameB);
+        versusOver = false;
         forge.util.ThreadUtil.invokeInGameThread(() -> {
             try {
                 BridgeMain.runVersus(ga, new BridgeMain.JsonPair(nameA, host), gb, new BridgeMain.JsonPair(nameB, setup), first);
@@ -362,6 +401,9 @@ public final class BridgeServer {
                 t.printStackTrace(System.out);
                 ga.sendFatal(String.valueOf(t));
                 gb.sendFatal(String.valueOf(t));
+            } finally {
+                // Over: its seats no longer make this table "full".
+                versusOver = true;
             }
         });
     }
@@ -475,7 +517,7 @@ public final class BridgeServer {
                     // Two players: a phone must say whose hand it is (its seat,
                     // from that player's own "Pair a phone"); without one it
                     // would hear the host's hand.
-                    if (!seatGuis.isEmpty()) {
+                    if (versusLive()) {
                         ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"seat\",\"hand\":true}"));
                         super.userEventTriggered(ctx, evt);
                         return;
@@ -497,7 +539,15 @@ public final class BridgeServer {
                 if (sm.find() && !seatGuis.isEmpty()) {
                     String seat = java.net.URLDecoder.decode(sm.group(1), java.nio.charset.StandardCharsets.UTF_8);
                     BridgeGui sg = seatGuis.get(seat);
+                    // Back to a seat: with the room's code (a seat name alone
+                    // is easy to guess).
+                    if (sg != null && !codeIn(uri)) {
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"code\",\"game\":true}"));
+                        super.userEventTriggered(ctx, evt);
+                        return;
+                    }
                     if (sg != null) {
+                        lastSeatSeen = System.currentTimeMillis();
                         seatChannels.put(seat, ctx.channel());
                         channelSeat.put(ctx.channel(), seat);
                         System.out.println("versus: " + seat + " reconnected");
@@ -520,11 +570,17 @@ public final class BridgeServer {
                 }
                 // A versus game is running and this screen is neither player:
                 // it must not see a player's hand. Told so, and nothing more.
-                if (!seatGuis.isEmpty()) {
-                    ctx.channel().writeAndFlush(new TextWebSocketFrame(
-                            "{\"t\":\"lobby\",\"full\":true,\"players\":" + seatGuis.keySet().size() + "}"));
+                if (versusLive()) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(fullJson(codeIn(uri))));
                     super.userEventTriggered(ctx, evt);
                     return;
+                }
+                // A two-player game that is over or abandoned: let it go, and
+                // this screen is a fresh table.
+                if (!seatGuis.isEmpty()) {
+                    System.out.println("versus: the last two-player game is over or abandoned - cleared");
+                    endEverything();
+                    gui = null;
                 }
                 // A game is already running: this is the tablet coming back —
                 // a reload, a screen that slept, a dropped Wi-Fi. Rejoin it,
@@ -887,6 +943,9 @@ public final class BridgeServer {
 
         @Override
         public void channelInactive(final ChannelHandlerContext ctx) {
+            if (seatChannels.containsValue(ctx.channel())) {
+                lastSeatSeen = System.currentTimeMillis();
+            }
             channelSeat.remove(ctx.channel());
             String phoneOf = handSeat.remove(ctx.channel());
             if (phoneOf != null) {
