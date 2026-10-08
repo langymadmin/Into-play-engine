@@ -20,12 +20,23 @@ public class LondonMulligan extends AbstractMulligan {
         return player.getMaxHandSize();
     }
 
+    // Rule 103.5 (London): draw seven, decide; only once the hand is KEPT are
+    // N cards put on the bottom. Forge used to ask for the bottom cards right
+    // after each new draw, before the keep decision — so a player chose what
+    // to bottom from a hand they might still mulligan away. Into Play patch.
     @Override
     public void mulliganDraw() {
         player.drawCards(handSizeAfterNextMulligan());
-        int tuckingCards = tuckCardsDuringMulligan();
-        CardCollection hand = new CardCollection(player.getCardsIn(ZoneType.Hand));
+    }
 
+    @Override
+    public void keep() {
+        super.keep();
+        int tuckingCards = tuckCardsDuringMulligan();
+        if (tuckingCards <= 0) {
+            return;
+        }
+        CardCollection hand = new CardCollection(player.getCardsIn(ZoneType.Hand));
         for (final Card c : player.getController().tuckCardsViaMulligan(hand, tuckingCards)) {
             player.getGame().getAction().moveToLibrary(c, -1, null);
         }

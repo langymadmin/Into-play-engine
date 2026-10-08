@@ -348,6 +348,7 @@ public final class BridgeServer {
         versusHostChannel = ch;
         client = ch;
         System.out.println("versus: " + nameOf(setup, "Player 1") + " is waiting for a second player");
+        ch.writeAndFlush(new TextWebSocketFrame(roomJson()));
         ch.writeAndFlush(new TextWebSocketFrame(lobbyJson(true)));
         // Anyone already connected (the second device opened first) is shown
         // the lobby too.
@@ -561,6 +562,16 @@ public final class BridgeServer {
                 }
                 // Versus: the host is waiting for a second player — this screen
                 // may be that player. It is shown the lobby; nothing starts.
+                // The host's own screen coming back while it waits (a reload):
+                // it says so (host=1, with the code), and waits again.
+                if (versusHost != null && uri.contains("host=1") && codeIn(uri)) {
+                    versusHostChannel = ctx.channel();
+                    client = ctx.channel();
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(roomJson()));
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(lobbyJson(true)));
+                    super.userEventTriggered(ctx, evt);
+                    return;
+                }
                 if (versusHost != null && ctx.channel() != versusHostChannel) {
                     // ...with the code. Without it: asked for the room and code.
                     ctx.channel().writeAndFlush(new TextWebSocketFrame(codeIn(uri) ? lobbyJson(false)
@@ -665,6 +676,20 @@ public final class BridgeServer {
                     return;
                 }
                 joinVersus(ctx.channel(), in);
+                return;
+            }
+            // The host gives up waiting ("Cancel" on the waiting screen).
+            if ("cancelVersus".equals(t) && ctx.channel() == versusHostChannel) {
+                System.out.println("versus: the host stopped waiting");
+                versusHost = null;
+                versusHostChannel = null;
+                // Waiting retired the last gui (hostVersus ends everything): the
+                // next game on this screen needs a fresh one, or it is dealt
+                // but nothing of it reaches the screen.
+                gui = new BridgeGui(BridgeServer.this::send);
+                started.set(false);
+                client = ctx.channel();
+                ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
                 return;
             }
             // The host starting a game against a second player on their own
