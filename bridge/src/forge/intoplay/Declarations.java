@@ -223,6 +223,14 @@ final class Declarations {
                     game.getAction().moveToGraveyard(card, null, AbilityKey.newMap());
                     said = card.getName() + " was put into the graveyard";
                     break;
+                case "battlefield":
+                    // A card of ours put onto the battlefield from wherever it is
+                    // (their reanimation, a "put it onto the battlefield" the
+                    // engine never saw): ETB triggers fire as for any arrival.
+                    if (card == null) { return; }
+                    game.getAction().moveToPlay(card, me, null, AbilityKey.newMap());
+                    said = card.getName() + " was put onto the battlefield";
+                    break;
                 case "library": {
                     if (card == null) { return; }
                     boolean top = !in.has("top") || in.get("top").getAsBoolean();
