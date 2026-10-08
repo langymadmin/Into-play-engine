@@ -332,6 +332,43 @@ final class Declarations {
                             : c.getName() + " was countered" + ("graveyard".equals(to) ? "" : " (to " + to + ")"));
                     break;
                 }
+                // Their Deflection / Misdirection / Redirect: a spell or ability
+                // of ours on the stack gets new targets. As Forge's own
+                // ChangeTargetsEffect does it — every targeting part of the
+                // stack instance is asked again (the screen's usual targeting),
+                // then the instance is updated, so "becomes the target" fires.
+                // The person at the table chooses, as they do for the seat.
+                case "redirect": {
+                    int index = in.has("stack") ? in.get("stack").getAsInt() : 0;
+                    forge.game.spellability.SpellAbilityStackInstance si = null;
+                    int i = 0;
+                    for (forge.game.spellability.SpellAbilityStackInstance s : game.getStack()) {
+                        if (i++ == index) {
+                            si = s;
+                            break;
+                        }
+                    }
+                    if (si == null) { return; }
+                    String name = si.getSpellAbility().getHostCard() == null ? "It" : si.getSpellAbility().getHostCard().getName();
+                    java.util.Set<forge.game.GameObject> distinct = new java.util.HashSet<>();
+                    boolean any = false;
+                    for (forge.game.spellability.SpellAbilityStackInstance cur = si; cur != null; cur = cur.getSubInstance()) {
+                        SpellAbility csa = cur.getSpellAbility();
+                        if (!csa.usesTargeting()) {
+                            continue;
+                        }
+                        any = true;
+                        forge.game.spellability.TargetChoices old = csa.getTargets();
+                        me.getController().chooseNewTargetsFor(csa, null, false);
+                        cur.updateTarget(old, distinct);
+                    }
+                    if (!any) {
+                        gui.tell(List.of(name + " has no target to change."));
+                        return;
+                    }
+                    said = name + " was redirected";
+                    break;
+                }
                 // Fire one of our card's triggered abilities by hand. The event
                 // that triggers it happened at the table — their creature was
                 // sacrificed, died, entered — so the engine never saw it; the
