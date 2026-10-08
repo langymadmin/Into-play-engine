@@ -691,6 +691,15 @@ public class BridgeGui extends AbstractGuiGame {
             if (st.isCreature()) {
                 j.addProperty("power", st.getPower());
                 j.addProperty("toughness", st.getToughness());
+                // The printed numbers too, so the screen can show when they
+                // changed (Tifa's landfall, an anthem, a pump): the card's art
+                // only ever shows what is printed.
+                forge.game.Game g = BridgeMain.currentGame;
+                forge.game.card.Card real = g == null ? null : g.findById(c.getId());
+                if (real != null && real.getCurrentState() != null) {
+                    j.addProperty("basePower", real.getCurrentState().getBasePower());
+                    j.addProperty("baseToughness", real.getCurrentState().getBaseToughness());
+                }
             }
         }
 
