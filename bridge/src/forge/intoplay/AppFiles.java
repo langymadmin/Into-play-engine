@@ -64,6 +64,15 @@ final class AppFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         FullHttpResponse res = null;
         Path root = dir;
+        // "Is this page the engine's?" - the app asks, so its homepage can
+        // send a chosen deck to the engine's table instead of a Firebase game.
+        if ("/engine.json".equals(uri)) {
+            res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK,
+                    Unpooled.copiedBuffer("{\"engine\":true}", java.nio.charset.StandardCharsets.UTF_8));
+            res.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+            res.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+            root = null;
+        }
         if (root != null) {
             Path f = null;
             try {

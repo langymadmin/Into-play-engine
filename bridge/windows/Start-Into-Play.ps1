@@ -35,7 +35,8 @@ $engineRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $App) { $App = Join-Path (Split-Path -Parent $engineRoot) "into-play" }
 $dist = Join-Path $App "dist"
 $logs = Join-Path $engineRoot "bridge\logs"
-$url = "http://localhost:$Port/?ui=3"
+# The homepage: pick a deck there, and Battlefield opens the engine table.
+$url = "http://localhost:$Port/"
 
 Add-Type -AssemblyName System.Windows.Forms
 # Run hidden, so problems are said in a box rather than a console.
@@ -65,7 +66,7 @@ if (Test-Path $tunnelYml) {
         }
     }
     if ($hostLine -and $cf) {
-        $url = "https://$($hostLine.Matches[0].Groups[1].Value)/?ui=3"
+        $url = "https://$($hostLine.Matches[0].Groups[1].Value)/"
         $ours = Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*into-play.yml*" }
         if (-not $ours) {
