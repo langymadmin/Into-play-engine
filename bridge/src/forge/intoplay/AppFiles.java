@@ -73,6 +73,19 @@ final class AppFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
             res.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
             root = null;
         }
+        // The app's own API routes live in the website's worker (Archidekt's
+        // proxy among them): passed on to it, so the homepage served from here
+        // works as on the website.
+        // Off the network thread: the website can take seconds to answer.
+        if (res == null && req.uri().startsWith("/api/archidekt/")) {
+            final String apiUri = req.uri();
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                FullHttpResponse r = website(apiUri);
+                r.headers().set(HttpHeaderNames.CONTENT_LENGTH, r.content().readableBytes());
+                ctx.writeAndFlush(r).addListener(ChannelFutureListener.CLOSE);
+            });
+            return;
+        }
         if (root != null) {
             Path f = null;
             try {
@@ -110,6 +123,29 @@ final class AppFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         res.headers().set(HttpHeaderNames.CONTENT_LENGTH, res.content().readableBytes());
         ctx.writeAndFlush(res).addListener(ChannelFutureListener.CLOSE);
+    }
+
+    /** Where the website's worker answers /api/* (override: -Dintoplay.website). */
+    private static final String WEBSITE = System.getProperty("intoplay.website", "https://www.into-play.com");
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+            .followRedirects(java.net.http.HttpClient.Redirect.NORMAL)
+            .connectTimeout(java.time.Duration.ofSeconds(10)).build();
+
+    /** A GET passed on to the website's worker, its answer passed back. */
+    private static FullHttpResponse website(final String uri) {
+        try {
+            java.net.http.HttpResponse<byte[]> r = HTTP.send(
+                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(WEBSITE + uri))
+                            .timeout(java.time.Duration.ofSeconds(25)).GET().build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+            FullHttpResponse res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1,
+                    HttpResponseStatus.valueOf(r.statusCode()), Unpooled.wrappedBuffer(r.body()));
+            res.headers().set(HttpHeaderNames.CONTENT_TYPE, r.headers().firstValue("content-type").orElse("application/json"));
+            res.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+            return res;
+        } catch (Exception e) {
+            return new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_GATEWAY);
+        }
     }
 
     /** From {@code -Dintoplay.app}; logged so a wrong folder is easy to spot. */

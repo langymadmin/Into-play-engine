@@ -135,6 +135,17 @@ final class MetaService extends SimpleChannelInboundHandler<FullHttpRequest> {
                 }
                 return cached("commander-" + slug, refresh, () -> commander(slug, arg));
             }
+            case "commanders":
+                // /meta/commanders/top: the most played commanders this year.
+                return cached("commanders-top", refresh, MetaService::topCommanders);
+            case "average": {
+                // /meta/average/<commander>: EDHREC's average deck for it.
+                String slug = edhrecSlug(arg);
+                if (slug.isEmpty()) {
+                    return null;
+                }
+                return cached("average-" + slug, refresh, () -> averageDeck(slug, arg));
+            }
             default:
                 return null;
         }
@@ -329,6 +340,57 @@ final class MetaService extends SimpleChannelInboundHandler<FullHttpRequest> {
         o.addProperty("slug", slug);
         o.addProperty("source", "EDHREC");
         o.add("cards", list);
+        return o;
+    }
+
+    /** The commanders most decks were built around this year: name, slug, decks. */
+    private static JsonObject topCommanders() throws Exception {
+        JsonObject root = JsonParser.parseString(get("https://json.edhrec.com/pages/commanders/year.json")).getAsJsonObject();
+        JsonArray views = root.getAsJsonObject("container").getAsJsonObject("json_dict")
+                .getAsJsonArray("cardlists").get(0).getAsJsonObject().getAsJsonArray("cardviews");
+        JsonArray out = new JsonArray();
+        for (JsonElement e : views) {
+            JsonObject v = e.getAsJsonObject();
+            if (!v.has("name")) {
+                continue;
+            }
+            JsonObject c = new JsonObject();
+            c.addProperty("name", v.get("name").getAsString());
+            c.addProperty("slug", v.has("sanitized") ? v.get("sanitized").getAsString() : edhrecSlug(v.get("name").getAsString()));
+            if (v.has("num_decks")) {
+                c.addProperty("decks", v.get("num_decks").getAsInt());
+            }
+            out.add(c);
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("source", "EDHREC");
+        o.add("commanders", out);
+        return o;
+    }
+
+    /**
+     * EDHREC's average deck for a commander: the whole list as {name, count},
+     * grouped by card type in EDHREC's "deck.cards" ({"Land": [["Forest", 4], ...]}).
+     */
+    private static JsonObject averageDeck(final String slug, final String name) throws Exception {
+        JsonObject root = JsonParser.parseString(get("https://json.edhrec.com/pages/average-decks/" + slug + ".json")).getAsJsonObject();
+        JsonObject groups = root.getAsJsonObject("deck").getAsJsonObject("cards");
+        JsonArray out = new JsonArray();
+        for (Map.Entry<String, JsonElement> g : groups.entrySet()) {
+            for (JsonElement e : g.getValue().getAsJsonArray()) {
+                JsonArray pair = e.getAsJsonArray();
+                JsonObject c = new JsonObject();
+                c.addProperty("name", pair.get(0).getAsString());
+                c.addProperty("count", pair.size() > 1 ? pair.get(1).getAsInt() : 1);
+                c.addProperty("type", g.getKey());
+                out.add(c);
+            }
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("commander", name);
+        o.addProperty("slug", slug);
+        o.addProperty("source", "EDHREC");
+        o.add("cards", out);
         return o;
     }
 
