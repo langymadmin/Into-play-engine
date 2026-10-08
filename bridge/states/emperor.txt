@@ -1,0 +1,15 @@
+# Abilities as boxes (The Wandering Emperor: three loyalty abilities) and the
+# stack's own actions (an ability on the stack: resolve or counter it).
+# No blank lines: GameState's splitLine reads charAt(0) without a length check.
+humanlife=20
+humanhand=Lightning Bolt;Opt;Plains;Island
+humanbattlefield=The Wandering Emperor|Counters:LOYALTY=3;Plains;Plains;Plains;Mountain;Island
+humanlibrary=Forest;Wastes;Swamp;Island;Plains;Mountain
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

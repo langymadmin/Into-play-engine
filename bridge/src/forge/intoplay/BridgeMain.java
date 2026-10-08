@@ -762,6 +762,8 @@ public final class BridgeMain {
                 .setPlayer(lobbyPlayer(a.name, firstSeat)));
         registered.add((commander ? RegisteredPlayer.forCommander(deckB) : new RegisteredPlayer(deckB))
                 .setPlayer(lobbyPlayer(b.name, firstSeat)));
+        // The host's setup decides it for both (Duel Commander: 20).
+        startingLife(registered, a.setup);
         GameRules rules = new GameRules(commander ? GameType.Commander : GameType.Constructed);
         if (commander) {
             rules.addAppliedVariant(GameType.Commander);
@@ -807,6 +809,20 @@ public final class BridgeMain {
         System.out.println("=== versus over ===");
     }
 
+    /** {"life": n} in a setup: every seat starts there instead of the variant's default. */
+    private static void startingLife(final List<RegisteredPlayer> registered, final com.google.gson.JsonObject setup) {
+        if (setup == null || !setup.has("life") || !setup.get("life").isJsonPrimitive()) {
+            return;
+        }
+        int life = setup.get("life").getAsInt();
+        if (life > 0) {
+            for (RegisteredPlayer r : registered) {
+                r.setStartingLife(life);
+            }
+            System.out.println("starting life: " + life);
+        }
+    }
+
     /** A player's name and their {"deck":…, "commanders":…} for {@link #runVersus}. */
     record JsonPair(String name, com.google.gson.JsonObject setup) { }
 
@@ -842,6 +858,9 @@ public final class BridgeMain {
             System.out.println("opponents: " + OPPONENTS);
         }
 
+        // The screen says how much life a game starts at when it is not the
+        // variant's own: Duel Commander is a Commander game at 20.
+        startingLife(registered, setup);
         GameRules rules = new GameRules(commander ? GameType.Commander : GameType.Constructed);
         if (commander) {
             rules.addAppliedVariant(GameType.Commander);
