@@ -4,6 +4,10 @@
 
 param([int]$Port = 8099)
 
+# The tunnel too, if Start-Into-Play started one.
+Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*into-play.yml*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
 $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if (-not $c) { Write-Host "  nothing running on port $Port"; exit 0 }
 $c | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }

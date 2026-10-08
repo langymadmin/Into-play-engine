@@ -51,6 +51,32 @@ function ServesApp {
 }
 function Open { if (-not $NoBrowser) { Start-Process $url } }
 
+# --- the tunnel, when Setup-Tunnel.ps1 made one ------------------------------
+# Started hidden beside the engine, once (it reconnects on its own if the
+# engine restarts). The table then opens on the public address, so the invite
+# and phone codes it shows work from any network.
+$tunnelYml = Join-Path $env:USERPROFILE ".cloudflared\into-play.yml"
+if (Test-Path $tunnelYml) {
+    $hostLine = Select-String -Path $tunnelYml -Pattern "^\s*-\s*hostname:\s*(\S+)" | Select-Object -First 1
+    $cf = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
+    if (-not $cf) {
+        foreach ($p in "C:\Program Files (x86)\cloudflared\cloudflared.exe", "C:\Program Files\cloudflared\cloudflared.exe") {
+            if (Test-Path $p) { $cf = $p }
+        }
+    }
+    if ($hostLine -and $cf) {
+        $url = "https://$($hostLine.Matches[0].Groups[1].Value)/?ui=3"
+        $ours = Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like "*into-play.yml*" }
+        if (-not $ours) {
+            New-Item -ItemType Directory -Force $logs | Out-Null
+            Start-Process -FilePath $cf -WindowStyle Hidden `
+                -RedirectStandardOutput (Join-Path $logs "tunnel.log") -RedirectStandardError (Join-Path $logs "tunnel-errors.log") `
+                -ArgumentList @("tunnel", "--config", "`"$tunnelYml`"", "run")
+        }
+    }
+}
+
 # --- already running? -------------------------------------------------------
 function EngineProcess {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
