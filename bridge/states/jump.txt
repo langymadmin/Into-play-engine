@@ -1,0 +1,13 @@
+# Rings jump: a creature that could attack, then Main 2 / End from main 1.
+humanlife=20
+humanhand=Lightning Bolt;Forest
+humanbattlefield=Grizzly Bears;Forest;Mountain
+humanlibrary=Forest;Forest;Forest;Forest
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

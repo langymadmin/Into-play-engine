@@ -321,6 +321,14 @@ public final class BridgeServer {
             if (current.versusHost != null) {
                 o.addProperty("host", nameOf(current.versusHost, "Player 1"));
             }
+            // Two players: their names, so a phone entering by room and code
+            // can say whose hand it is (one seat each).
+            if (current.versusLive()) {
+                o.addProperty("game", true);
+                com.google.gson.JsonArray s = new com.google.gson.JsonArray();
+                current.seatGuis.keySet().forEach(s::add);
+                o.add("seats", s);
+            }
         }
         return o;
     }
@@ -604,7 +612,15 @@ public final class BridgeServer {
                     // from that player's own "Pair a phone"); without one it
                     // would hear the host's hand.
                     if (versusLive()) {
-                        ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"seat\",\"hand\":true}"));
+                        // With the code: whose hand could it be (the phone asks).
+                        JsonObject d = new JsonObject();
+                        d.addProperty("t", "denied");
+                        d.addProperty("why", "seat");
+                        d.addProperty("hand", true);
+                        com.google.gson.JsonArray s = new com.google.gson.JsonArray();
+                        seatGuis.keySet().forEach(s::add);
+                        d.add("seats", s);
+                        ctx.channel().writeAndFlush(new TextWebSocketFrame(d.toString()));
                         super.userEventTriggered(ctx, evt);
                         return;
                     }
