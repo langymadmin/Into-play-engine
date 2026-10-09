@@ -66,9 +66,13 @@ final class Rewind {
             GameSnapshot snap = new GameSnapshot(game);
             snap.makeCopy();
             Entry top = history.peekLast();
-            if (top != null && top.signature.equals(sig)) {
+            boolean changed = top == null || !top.signature.equals(sig);
+            if (!changed) {
                 history.pollLast(); // same game, later step: keep the later one
             }
+            // On disk too, for "Resume the last game" (every moment, so the
+            // step is right; cheap next to the snapshot above).
+            Saves.snapshot(game);
             java.util.Set<Integer> ids = new java.util.HashSet<>();
             for (SpellAbilityStackInstance si : game.getStack()) {
                 ids.add(si.getId());

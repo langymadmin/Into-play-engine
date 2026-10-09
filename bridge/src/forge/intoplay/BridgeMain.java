@@ -150,6 +150,10 @@ public final class BridgeMain {
                 p.setFirstController(new PlayerControllerHuman(game, p, this) {
                     @Override
                     public Player chooseStartingPlayer(final boolean isFirstGame) {
+                        // Resuming: the saved state says whose turn it is.
+                        if (Saves.resuming) {
+                            return game.getPlayers().get(0);
+                        }
                         String seat = "me".equals(first) ? SEAT
                                 : "them".equals(first) ? OFF_TABLE
                                 : first != null && first.startsWith("seat:") ? first.substring(5) : null;
@@ -246,8 +250,9 @@ public final class BridgeMain {
                         // Whose hand this is comes from the controller's own
                         // seat, p.
                         // Phantom's hand is placeholders: it always keeps,
-                        // test positions included.
-                        if (isOffTable(p.getName())) {
+                        // test positions included. Resuming: the hands come
+                        // from the save, nothing to keep or mulligan.
+                        if (isOffTable(p.getName()) || Saves.resuming) {
                             return true;
                         }
                         return super.mulliganKeepHand(startsGame, cardsToReturn);
@@ -344,6 +349,7 @@ public final class BridgeMain {
     public static void main(final String[] args) throws Exception {
         final String res = args.length > 0 ? args[0] : "forge-gui/res";
         final int port = args.length > 1 ? Integer.parseInt(args[1]) : 8099;
+        Saves.forPort(port);
         // A scenario file, if one was named. See loadState().
         final String state = args.length > 2 ? args[2] : System.getenv("STATE");
 
@@ -850,7 +856,20 @@ public final class BridgeMain {
             g.openView(own);
         }
         System.out.println("=== starting versus: " + a.name + " vs " + b.name + " ===");
-        playOn(game, () -> match.startGame(game), java.util.List.of(guiA, guiB));
+        final boolean resume = a.setup.has("resume") && a.setup.get("resume").getAsBoolean();
+        Saves.resuming = resume;
+        Saves.beginVersus(game, a.name, a.setup, b.name, b.setup, first);
+        if (resume) {
+            playOn(game, () -> match.startGame(game, () -> {
+                applyState(game, Saves.STATE.toString());
+                Saves.resuming = false;
+            }), java.util.List.of(guiA, guiB));
+        } else {
+            playOn(game, () -> match.startGame(game), java.util.List.of(guiA, guiB));
+        }
+        if (game.isGameOver()) {
+            Saves.over(game);
+        }
         System.out.println("=== versus over ===");
     }
 
@@ -1001,7 +1020,14 @@ public final class BridgeMain {
         }
 
         System.out.println("=== starting game ===");
-        if (statePath == null || statePath.isBlank()) {
+        // "Resume the last game": the saved state, dealt as a scenario is.
+        final boolean resume = setup != null && setup.has("resume") && setup.get("resume").getAsBoolean();
+        final String seed = resume ? Saves.STATE.toString() : statePath;
+        Saves.resuming = resume;
+        if (setup != null) {
+            Saves.begin(game, setup);
+        }
+        if (seed == null || seed.isBlank()) {
             playOn(game, () -> match.startGame(game), java.util.List.of(gui));
         } else {
             // The hook runs after opening hands are dealt and the first turn is
@@ -1009,8 +1035,9 @@ public final class BridgeMain {
             // sets givePriorityToPlayer=false around it). So the client's first
             // prompt is already in the seeded position: nothing has to be played
             // to get there, and nothing can go wrong on the way.
-            match.startGame(game, () -> {
-                applyState(game, statePath);
+            playOn(game, () -> match.startGame(game, () -> {
+                applyState(game, seed);
+                Saves.resuming = false;
                 // applyState clears the command zone along with everything else,
                 // which takes the seal with it. Re-seal, and let the assertion
                 // inside sealOffTableLibrary print so a silent unseal is visible.
@@ -1019,7 +1046,10 @@ public final class BridgeMain {
                         sealOffTableLibrary(game, p);
                     }
                 }
-            });
+            }), java.util.List.of(gui));
+        }
+        if (game.isGameOver()) {
+            Saves.over(game);
         }
 
         System.out.println("=== game over ===");

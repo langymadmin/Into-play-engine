@@ -424,11 +424,55 @@ public final class BridgeServer {
         started.set(false);
     }
 
+    /** No game here — and, when there is one on disk, the offer to resume it. */
+    private static String idleJson() {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "idle");
+        JsonObject saved = Saves.offer();
+        if (saved != null) {
+            o.add("saved", saved);
+        }
+        return o.toString();
+    }
+
+    /**
+     * "Resume the last game". Against the table: dealt again from the save at
+     * once. Two players: this screen hosts it, as for a new game, and the
+     * other player joins with the room and code — their seat, name and deck
+     * come from the save, whatever they pick.
+     */
+    private void resume(final Channel ch) {
+        JsonObject s = Saves.setup();
+        if (s == null) {
+            ch.writeAndFlush(new TextWebSocketFrame(idleJson()));
+            return;
+        }
+        if (s.has("versus") && s.get("versus").getAsBoolean()) {
+            JsonObject a = s.getAsJsonObject("a").deepCopy();
+            a.addProperty("name", s.get("nameA").getAsString());
+            a.addProperty("resume", true);
+            hostVersus(ch, a);
+            return;
+        }
+        JsonObject setup = s.getAsJsonObject("setup").deepCopy();
+        setup.addProperty("resume", true);
+        client = ch;
+        newGame(setup);
+    }
+
     private String lobbyJson(final boolean youHost) {
         JsonObject o = new JsonObject();
         o.addProperty("t", "lobby");
         o.addProperty("host", nameOf(versusHost, "Player 1"));
         o.addProperty("youHost", youHost);
+        // Resuming a two-player game: the second player only has to come back.
+        if (versusHost != null && versusHost.has("resume")) {
+            JsonObject sv = Saves.setup();
+            o.addProperty("resume", true);
+            if (sv != null && sv.has("nameB")) {
+                o.addProperty("guest", sv.get("nameB").getAsString());
+            }
+        }
         // Where the second player's device should go (a QR on the host's screen).
         o.add("addresses", BridgeGui.lanAddresses());
         return o.toString();
@@ -455,11 +499,20 @@ public final class BridgeServer {
         JsonObject host = versusHost;
         Channel hostCh = versusHostChannel;
         if (host == null || hostCh == null) {
-            ch.writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
+            ch.writeAndFlush(new TextWebSocketFrame(idleJson()));
             return;
         }
+        // Resuming: the second player's name and deck are the saved ones.
+        JsonObject sv = host.has("resume") ? Saves.setup() : null;
+        final JsonObject guestSetup;
+        if (sv != null && sv.has("b")) {
+            guestSetup = sv.getAsJsonObject("b").deepCopy();
+            guestSetup.addProperty("name", sv.get("nameB").getAsString());
+        } else {
+            guestSetup = setup;
+        }
         String a = nameOf(host, "Player 1");
-        String b = nameOf(setup, "Player 2");
+        String b = nameOf(guestSetup, "Player 2");
         if (b.equalsIgnoreCase(a)) {
             b = b + " 2";
         }
@@ -489,7 +542,7 @@ public final class BridgeServer {
         versusOver = false;
         forge.util.ThreadUtil.invokeInGameThread(() -> {
             try {
-                BridgeMain.runVersus(ga, new BridgeMain.JsonPair(nameA, host), gb, new BridgeMain.JsonPair(nameB, setup), first);
+                BridgeMain.runVersus(ga, new BridgeMain.JsonPair(nameA, host), gb, new BridgeMain.JsonPair(nameB, guestSetup), first);
             } catch (Throwable t) {
                 System.out.println("[versus ended] " + t);
                 t.printStackTrace(System.out);
@@ -752,7 +805,7 @@ public final class BridgeServer {
                     // No game here (a fresh engine, or the last one ended): a
                     // screen that reconnects with an old board must not keep
                     // drawing it as if it were live.
-                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame(idleJson()));
                 }
             }
             super.userEventTriggered(ctx, evt);
@@ -794,7 +847,12 @@ public final class BridgeServer {
                 gui = new BridgeGui(BridgeServer.this::send);
                 started.set(false);
                 client = ctx.channel();
-                ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"idle\"}"));
+                ctx.channel().writeAndFlush(new TextWebSocketFrame(idleJson()));
+                return;
+            }
+            // "Resume the last game" (after a crash, a reboot, a lost network).
+            if ("resume".equals(t)) {
+                resume(ctx.channel());
                 return;
             }
             // The host starting a game against a second player on their own

@@ -107,3 +107,6 @@ forge-gui-ios/robovm.properties
 # The engine's saved metagame (MetaService)
 bridge/cache/
 bridge/logs/
+
+# Saved games in progress (Saves.java)
+bridge/saves/

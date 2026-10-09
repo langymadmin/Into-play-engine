@@ -50,6 +50,15 @@ final class Declarations {
             return;
         }
         final String what = in.has("what") ? in.get("what").getAsString() : "";
+        // Nothing is declared before the game is under way. During the coin
+        // toss and the mulligans the hand is being decided (a card drawn
+        // then left the London mulligan waiting for a hand that no longer
+        // matched, and the game froze), and the game object may still be
+        // the last, finished one.
+        if (game.isGameOver() || game.getAge() != forge.game.GameStage.Play) {
+            gui.tell(List.of("Not yet — keep or mulligan first. Once the game has started, that works."));
+            return;
+        }
         game.getAction().invoke(() -> {
             try {
                 enact(game, gui, seatName, in, what);
