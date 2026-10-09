@@ -78,6 +78,18 @@ if (Test-Path $tunnelYml) {
     }
 }
 
+# --- keeping the table reachable --------------------------------------------
+# Keep-Table.ps1, hidden, once: the PC stays awake while the engine runs, and
+# the tunnel is started again if it stops. It waits for the engine, and ends
+# when the engine does.
+$keeper = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*Keep-Table.ps1*" }
+if (-not $keeper) {
+    Start-Process -FilePath "powershell.exe" -WindowStyle Hidden -ArgumentList @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+        "-File", "`"$(Join-Path $PSScriptRoot "Keep-Table.ps1")`"", "-Port", $Port)
+}
+
 # --- already running? -------------------------------------------------------
 function EngineProcess {
     $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1

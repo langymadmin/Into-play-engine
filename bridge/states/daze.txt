@@ -1,0 +1,13 @@
+# Daze's alternative cost: return an Island (a dual counts) instead of {1}{U}.
+humanlife=20
+humanhand=Daze;Lightning Bolt
+humanbattlefield=Hallowed Fountain;Mountain
+humanlibrary=Island;Island;Island
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

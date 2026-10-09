@@ -183,7 +183,13 @@ public class TargetSelection {
             }
             return ability.getTargets().add(validTargets.get(0));
         }
-        if (!zones.contains(ZoneType.Stack)) {
+        // "Target spell or nonland permanent" (Sink into Stupor) with no spell
+        // to point at: the permanent is picked on the board, as any other —
+        // which is also where an off-table opponent's card is offered. The
+        // list chooser below has nothing to show and quietly cancelled.
+        final boolean boardOnly = offTableTargets && zones.contains(ZoneType.Battlefield)
+                && validTargets.stream().noneMatch(c -> c.getZone() != null && c.getZone().is(ZoneType.Stack));
+        if (!zones.contains(ZoneType.Stack) || boardOnly) {
             InputSelectTargets inp = new InputSelectTargets(controller, validTargets, ability, mandatory, numTargets, divisionValues, filter, mustTargetFiltered);
             inp.showAndWait();
             choiceResult = !inp.hasCancelled();

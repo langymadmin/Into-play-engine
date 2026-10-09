@@ -223,6 +223,14 @@ final class Declarations {
                     game.getAction().moveToGraveyard(card, null, AbilityKey.newMap());
                     said = card.getName() + " was put into the graveyard";
                     break;
+                case "command":
+                    // Our commander back to the command zone — from the
+                    // graveyard or exile (the question at the moment it died
+                    // was missed or answered No), or from anywhere else.
+                    if (card == null || !card.isRealCommander()) { return; }
+                    game.getAction().moveTo(card.getOwner().getZone(ZoneType.Command), card, null, AbilityKey.newMap());
+                    said = card.getName() + " went back to the command zone";
+                    break;
                 case "battlefield":
                     // A card of ours put onto the battlefield from wherever it is
                     // (their reanimation, a "put it onto the battlefield" the

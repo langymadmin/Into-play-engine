@@ -208,7 +208,9 @@ public final class BridgeMain {
                     // back" (see Rewind).
                     @Override
                     public java.util.List<forge.game.spellability.SpellAbility> chooseSpellAbilityToPlay() {
-                        if (!isOffTable(p.getName()) && !VERSUS) {
+                        // Two players too: a take-back there is asked of the
+                        // other player first (BridgeServer "rewind").
+                        if (!isOffTable(p.getName())) {
                             Rewind.remember(game);
                         }
                         return super.chooseSpellAbilityToPlay();
@@ -746,6 +748,49 @@ public final class BridgeMain {
      * blocks, no "their table", no take-back (it would undo the other
      * player's turn too).
      */
+    /**
+     * Plays the game; if the rules engine throws mid-game (a corner of the
+     * rules Forge gets wrong), the game is put back to the last moment
+     * remembered for take-backs and goes on from there, rather than ending.
+     * Each further failure goes one step further back.
+     */
+    static void playOn(final Game game, final Runnable start, final java.util.List<BridgeGui> guis) {
+        RuntimeException crash;
+        try {
+            start.run();
+            return;
+        } catch (RuntimeException e) {
+            crash = e;
+        }
+        for (int i = 0; i < 8; i++) {
+            System.out.println("[engine tripped] " + crash);
+            crash.printStackTrace(System.out);
+            if (game.isGameOver()) {
+                throw crash;
+            }
+            String step = Rewind.recover(game);
+            if (step == null) {
+                throw crash;
+            }
+            if (currentForwarder != null) {
+                currentForwarder.flush();
+            }
+            for (BridgeGui g : guis) {
+                g.tell(java.util.List.of("The rules engine tripped over something, so the game went back to "
+                        + step + " — just before it. Carry on from there."));
+                g.sendBoard();
+            }
+            try {
+                game.getPhaseHandler().mainGameLoop();
+                game.fireEvent(new forge.game.event.GameEventGameFinished());
+                return;
+            } catch (RuntimeException e) {
+                crash = e;
+            }
+        }
+        throw crash;
+    }
+
     static void runVersus(final BridgeGui guiA, final JsonPair a, final BridgeGui guiB, final JsonPair b,
                           final String first) {
         VERSUS = true;
@@ -805,7 +850,7 @@ public final class BridgeMain {
             g.openView(own);
         }
         System.out.println("=== starting versus: " + a.name + " vs " + b.name + " ===");
-        match.startGame(game);
+        playOn(game, () -> match.startGame(game), java.util.List.of(guiA, guiB));
         System.out.println("=== versus over ===");
     }
 
@@ -957,7 +1002,7 @@ public final class BridgeMain {
 
         System.out.println("=== starting game ===");
         if (statePath == null || statePath.isBlank()) {
-            match.startGame(game);
+            playOn(game, () -> match.startGame(game), java.util.List.of(gui));
         } else {
             // The hook runs after opening hands are dealt and the first turn is
             // set up, but before priority is offered (PhaseHandler.setupFirstTurn

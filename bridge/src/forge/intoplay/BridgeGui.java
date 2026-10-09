@@ -684,6 +684,23 @@ public class BridgeGui extends AbstractGuiGame {
         j.addProperty("token", c.isToken());
 
         final CardView.CardStateView st = c.getCurrentState();
+        // Double-faced (transforming, or modal like Sink into Stupor): both
+        // names, front first, and which one is up — the screen draws that
+        // face's art, and lets the player look at the other.
+        if (st != null && !c.isFaceDown() && (c.isDoubleFacedCard() || c.isModalCard()) && c.getAlternateState() != null) {
+            CardView.CardStateView alt = c.getAlternateState();
+            boolean back = st.getState() == forge.card.CardStateName.Backside;
+            com.google.gson.JsonArray faces = new com.google.gson.JsonArray();
+            faces.add(back ? alt.getName() : st.getName());
+            faces.add(back ? st.getName() : alt.getName());
+            j.add("faces", faces);
+            j.addProperty("back", back);
+            // The type line of each face, so a land back (an MDFC) is seen.
+            com.google.gson.JsonArray ft = new com.google.gson.JsonArray();
+            ft.add(String.valueOf((back ? alt : st).getType()));
+            ft.add(String.valueOf((back ? st : alt).getType()));
+            j.add("faceTypes", ft);
+        }
         if (st != null) {
             // The type line as the engine sees it, so a client never has to
             // guess from the name whether something is a land.

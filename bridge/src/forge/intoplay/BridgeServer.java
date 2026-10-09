@@ -121,6 +121,91 @@ public final class BridgeServer {
         return System.currentTimeMillis() - lastSeatSeen < ABANDONED_MS;
     }
 
+    // ------------------------------------------------------------------
+    // Take-backs between two players: asked, not taken.
+    // ------------------------------------------------------------------
+
+    /** Which seat a two-player gui speaks for (null for a single-screen game). */
+    private String seatOfGui(final BridgeGui g) {
+        for (java.util.Map.Entry<String, BridgeGui> e : seatGuis.entrySet()) {
+            if (e.getValue() == g) {
+                return e.getKey();
+            }
+        }
+        return null;
+    }
+
+    /** Who asked to take back, waiting for the other player's answer. */
+    private volatile String pendingRewindFrom;
+
+    /**
+     * A player asks to take back their last action. It goes back to before it
+     * for both of them — so the other player is asked, told what it was, and
+     * the game waits for nothing: they answer when they like (Allow / No).
+     */
+    private void askRewind(final forge.game.Game game, final String from) {
+        BridgeGui asker = seatGuis.get(from);
+        if (Rewind.available(game) <= 0) {
+            if (asker != null) {
+                asker.tell(java.util.List.of("Nothing to take back yet."));
+            }
+            return;
+        }
+        String other = seatGuis.keySet().stream().filter(s -> !s.equals(from)).findFirst().orElse(null);
+        if (other == null) {
+            return;
+        }
+        pendingRewindFrom = from;
+        // What the last thing done was, as the game log says it.
+        String last = "";
+        try {
+            java.util.List<forge.game.GameLogEntry> log = game.getGameLog().getLogEntries(null);
+            if (log != null && !log.isEmpty()) {
+                last = log.get(0).message();
+            }
+        } catch (RuntimeException e) {
+            last = "";
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "rewindAsk");
+        o.addProperty("from", from);
+        o.addProperty("last", last);
+        sendSeat(other, o.toString());
+        if (asker != null) {
+            asker.tell(java.util.List.of("Asked " + other + " to let you take that back…"));
+        }
+    }
+
+    /** Back one step, then every screen given is told and redrawn. */
+    private void rewindFor(final forge.game.Game game, final java.util.List<BridgeGui> guis, final String said) {
+        game.getAction().invoke(() -> {
+            boolean ok;
+            try {
+                ok = Rewind.back(game);
+                if (ok) {
+                    game.getAction().checkStateEffects(true);
+                    game.updateStackForView();
+                    game.updateCombatForView();
+                    game.updatePhaseForView();
+                    game.updateTurnForView();
+                    game.updatePlayerTurnForView();
+                }
+            } catch (RuntimeException e) {
+                System.out.println("rewind failed: " + e);
+                e.printStackTrace(System.out);
+                ok = false;
+            }
+            if (BridgeMain.currentForwarder != null) {
+                BridgeMain.currentForwarder.flush();
+            }
+            for (BridgeGui gg : guis) {
+                gg.tell(java.util.List.of(ok ? said : "Could not take that back."));
+                gg.sendBoard();
+                gg.reshowPrompts();
+            }
+        });
+    }
+
     /** When a player's screen was last connected (see versusLive). */
     private volatile long lastSeatSeen;
     private static final long ABANDONED_MS = 10 * 60 * 1000;
@@ -667,6 +752,10 @@ public final class BridgeServer {
                 return;
             }
             final String t = in.has("t") ? in.get("t").getAsString() : "";
+            // The screen's heartbeat, so the tunnel keeps the socket open.
+            if ("ping".equals(t)) {
+                return;
+            }
             // The second player joining a waiting versus game.
             if ("join".equals(t)) {
                 // Only with the room's code (typed on the landing page, or in
@@ -798,6 +887,13 @@ public final class BridgeServer {
                     if (game == null) {
                         break;
                     }
+                    // Two players: it would undo the other player's moves too,
+                    // so they are asked first; nothing happens until they allow it.
+                    String mySeat = seatOfGui(g);
+                    if (!seatGuis.isEmpty() && mySeat != null) {
+                        askRewind(game, mySeat);
+                        break;
+                    }
                     game.getAction().invoke(() -> {
                         try {
                             if (Rewind.back(game)) {
@@ -825,6 +921,28 @@ public final class BridgeServer {
                         g.sendBoard();
                         g.reshowPrompts();
                     });
+                    break;
+                }
+                // The other player's answer to a take-back request.
+                case "rewindAnswer": {
+                    String seatOf = seatOfGui(g);
+                    String from = pendingRewindFrom;
+                    pendingRewindFrom = null;
+                    if (from == null || seatOf == null || seatOf.equals(from)) {
+                        break;
+                    }
+                    BridgeGui asker = seatGuis.get(from);
+                    boolean yes = in.has("yes") && in.get("yes").getAsBoolean();
+                    if (!yes) {
+                        if (asker != null) {
+                            asker.tell(java.util.List.of(seatOf + " said no — the game goes on as it is."));
+                        }
+                        break;
+                    }
+                    forge.game.Game game = BridgeMain.currentGame;
+                    if (game != null) {
+                        rewindFor(game, new java.util.ArrayList<>(seatGuis.values()), from + " took back their last action — " + seatOf + " allowed it.");
+                    }
                     break;
                 }
                 // Something the opponent's cardboard did to our side, enacted

@@ -1,0 +1,15 @@
+# Modal double-faced: Sink into Stupor (spell) // Soporific Springs (land),
+# against an opponent with nothing in the engine to target. And a commander
+# in the graveyard, to send back to the command zone.
+humanlife=20
+humanhand=Sink into Stupor;Delver of Secrets
+humanbattlefield=Island;Island;Island;Island
+humanlibrary=Island;Island;Island
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true
