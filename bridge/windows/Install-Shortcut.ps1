@@ -14,10 +14,10 @@ $vbs = Join-Path $PSScriptRoot "Start-Into-Play.vbs"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $shell = New-Object -ComObject WScript.Shell
 
-function Make($link, $extra, $what) {
+function Make($link, $extra, $what, $script = $vbs) {
     $s = $shell.CreateShortcut($link)
     $s.TargetPath = "wscript.exe"
-    $s.Arguments = "`"$vbs`"$extra"
+    $s.Arguments = "`"$script`"$extra"
     $s.WorkingDirectory = $root
     $s.Description = $what
     # The app's own icon, when there is one next to it.
@@ -28,6 +28,9 @@ function Make($link, $extra, $what) {
 }
 
 Make (Join-Path ([Environment]::GetFolderPath("Desktop")) "Into Play.lnk") "" "Start Into Play and open the table"
+# And one to stop it: the engine, the tunnel and the keeper (a game in
+# progress is saved, and offered again at the next start).
+Make (Join-Path ([Environment]::GetFolderPath("Desktop")) "Stop Into Play.lnk") "" "Stop Into Play" (Join-Path $PSScriptRoot "Stop-Into-Play.vbs")
 if ($Startup) {
     Make (Join-Path ([Environment]::GetFolderPath("Startup")) "Into Play engine.lnk") " -NoBrowser" "Start the Into Play engine at sign-in"
 }

@@ -13,6 +13,6 @@ Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction Sile
     Where-Object { $_.CommandLine -like "*into-play.yml*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
 $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if (-not $c) { Write-Host "  nothing running on port $Port"; exit 0 }
+if (-not $c) { Say "Into Play was not running."; exit 0 }
 $c | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-Write-Host "  stopped the engine on port $Port" -ForegroundColor Green
+Say "Into Play stopped. A game in progress was saved - the next start offers to resume it."

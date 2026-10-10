@@ -110,9 +110,21 @@ final class Saves {
         }
     }
 
+    /** The game being saved is about to be ended by the table, not finished: keep its save. */
+    private static Game keepGame;
+
+    static synchronized void keepNext() {
+        keepGame = savingFor;
+    }
+
     /** The game ended (someone won, or it was conceded): nothing to resume. */
     static synchronized void over(final Game game) {
         if (game != savingFor) {
+            return;
+        }
+        if (game == keepGame) {
+            keepGame = null;
+            savingFor = null;
             return;
         }
         savingFor = null;

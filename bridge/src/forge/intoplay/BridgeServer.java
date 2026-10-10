@@ -850,6 +850,27 @@ public final class BridgeServer {
                 ctx.channel().writeAndFlush(new TextWebSocketFrame(idleJson()));
                 return;
             }
+            // The table's own screen ends whatever is being played here (a
+            // two-player game left running, a host still waiting) to start
+            // its own — with the room's code, so a passer-by cannot. The
+            // game was saved as it went: it stays on offer to resume.
+            if ("endTable".equals(t)) {
+                if (!(in.has("code") && CODE.equals(in.get("code").getAsString()))) {
+                    ctx.channel().writeAndFlush(new TextWebSocketFrame("{\"t\":\"denied\",\"why\":\"code\"}"));
+                    return;
+                }
+                System.out.println("table: ended by its own screen");
+                Saves.keepNext();
+                endEverything();
+                versusHost = null;
+                versusHostChannel = null;
+                versusOver = true;
+                gui = new BridgeGui(BridgeServer.this::send);
+                client = ctx.channel();
+                ctx.channel().writeAndFlush(new TextWebSocketFrame(roomJson()));
+                ctx.channel().writeAndFlush(new TextWebSocketFrame(idleJson()));
+                return;
+            }
             // "Resume the last game" (after a crash, a reboot, a lost network).
             if ("resume".equals(t)) {
                 resume(ctx.channel());
