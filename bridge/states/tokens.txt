@@ -1,0 +1,13 @@
+# Token art (Raise the Alarm: white 1/1 Soldiers) and a counter tile over a printed P/T.
+humanlife=20
+humanhand=Raise the Alarm
+humanbattlefield=Grizzly Bears|Counters:P1P1=2;Plains;Plains
+humanlibrary=Plains;Plains;Plains
+humangraveyard=
+ailife=20
+aihand=
+aibattlefield=
+turn=3
+activeplayer=human
+activephase=MAIN1
+removesummoningsickness=true

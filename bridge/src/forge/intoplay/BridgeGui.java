@@ -701,6 +701,21 @@ public class BridgeGui extends AbstractGuiGame {
             ft.add(String.valueOf((back ? st : alt).getType()));
             j.add("faceTypes", ft);
         }
+        // A token: what it looks like — its colors and the set it comes from —
+        // so the screen finds THAT token's art, not any token of the name.
+        if (st != null && c.isToken()) {
+            forge.card.ColorSet cs = st.getColors();
+            StringBuilder col = new StringBuilder();
+            if (cs.hasWhite()) col.append('W');
+            if (cs.hasBlue()) col.append('U');
+            if (cs.hasBlack()) col.append('B');
+            if (cs.hasRed()) col.append('R');
+            if (cs.hasGreen()) col.append('G');
+            j.addProperty("colors", col.toString());
+            if (st.getSetCode() != null) {
+                j.addProperty("tokenSet", st.getSetCode());
+            }
+        }
         if (st != null) {
             // The type line as the engine sees it, so a client never has to
             // guess from the name whether something is a land.
