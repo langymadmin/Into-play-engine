@@ -90,6 +90,11 @@ final class Saves {
         if (game != savingFor || game.isGameOver() || game.getPhaseHandler().getPhase() == null) {
             return;
         }
+        // Only at a settled moment: with a spell on the stack the save would
+        // come back without it (Forge's state format has no stack).
+        if (!game.getStack().isEmpty()) {
+            return;
+        }
         try {
             forge.game.GameState gs = new forge.game.GameState();
             gs.initFromGame(game);

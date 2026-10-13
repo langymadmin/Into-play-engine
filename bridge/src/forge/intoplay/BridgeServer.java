@@ -137,15 +137,21 @@ public final class BridgeServer {
 
     /** Who asked to take back, waiting for the other player's answer. */
     private volatile String pendingRewindFrom;
+    /** The two-player game's host: their seat and signed-in account (see check). */
+    volatile String hostSeat;
+    volatile String hostUid;
+    /** The moment they asked to go back to. */
+    private volatile int pendingRewindTo = -1;
 
     /**
      * A player asks to take back their last action. It goes back to before it
      * for both of them — so the other player is asked, told what it was, and
      * the game waits for nothing: they answer when they like (Allow / No).
      */
-    private void askRewind(final forge.game.Game game, final String from) {
+    private void askRewind(final forge.game.Game game, final String from, final int to) {
         BridgeGui asker = seatGuis.get(from);
-        if (Rewind.available(game) <= 0) {
+        String where = Rewind.labelOf(to);
+        if (where == null || Rewind.available(game) <= 0) {
             if (asker != null) {
                 asker.tell(java.util.List.of("Nothing to take back yet."));
             }
@@ -156,54 +162,48 @@ public final class BridgeServer {
             return;
         }
         pendingRewindFrom = from;
-        // What the last thing done was, as the game log says it.
-        String last = "";
-        try {
-            java.util.List<forge.game.GameLogEntry> log = game.getGameLog().getLogEntries(null);
-            if (log != null && !log.isEmpty()) {
-                last = log.get(0).message();
-            }
-        } catch (RuntimeException e) {
-            last = "";
-        }
+        pendingRewindTo = to;
         JsonObject o = new JsonObject();
         o.addProperty("t", "rewindAsk");
         o.addProperty("from", from);
-        o.addProperty("last", last);
+        o.addProperty("where", where);
         sendSeat(other, o.toString());
         if (asker != null) {
-            asker.tell(java.util.List.of("Asked " + other + " to let you take that back…"));
+            asker.tell(java.util.List.of("Asked " + other + " to let you go back to " + where + "…"));
         }
     }
 
-    /** Back one step, then every screen given is told and redrawn. */
-    private void rewindFor(final forge.game.Game game, final java.util.List<BridgeGui> guis, final String said) {
-        game.getAction().invoke(() -> {
-            boolean ok;
-            try {
-                ok = Rewind.back(game);
-                if (ok) {
-                    game.getAction().checkStateEffects(true);
-                    game.updateStackForView();
-                    game.updateCombatForView();
-                    game.updatePhaseForView();
-                    game.updateTurnForView();
-                    game.updatePlayerTurnForView();
-                }
-            } catch (RuntimeException e) {
-                System.out.println("rewind failed: " + e);
-                e.printStackTrace(System.out);
-                ok = false;
-            }
-            if (BridgeMain.currentForwarder != null) {
-                BridgeMain.currentForwarder.flush();
-            }
+    /**
+     * Go back to a moment: asked of Rewind, then whoever the game is waiting
+     * on for priority is released, and BridgeMain.playOn restores the moment
+     * and starts the game again from there (every screen is redrawn then).
+     */
+    private void goBack(final forge.game.Game game, final int to, final String said, final java.util.List<BridgeGui> guis) {
+        if (!Rewind.inPriority) {
             for (BridgeGui gg : guis) {
-                gg.tell(java.util.List.of(ok ? said : "Could not take that back."));
-                gg.sendBoard();
-                gg.reshowPrompts();
+                gg.tell(java.util.List.of("Answer the question on screen first — then Take back works."));
             }
-        });
+            return;
+        }
+        if (!Rewind.request(game, to, said)) {
+            for (BridgeGui gg : guis) {
+                gg.tell(java.util.List.of("That moment is no longer there to go back to."));
+            }
+            return;
+        }
+        String seat = Rewind.waitingSeat;
+        java.util.List<BridgeGui> all = new java.util.ArrayList<>(seatGuis.values());
+        if (gui != null) {
+            all.add(gui);
+        }
+        for (BridgeGui gg : all) {
+            IGameController c = seat == null ? null : gg.controllerFor(seat);
+            if (c != null) {
+                final IGameController release = c;
+                INPUT.execute(release::selectButtonOk);
+                return;
+            }
+        }
     }
 
     /** When a player's screen was last connected (see versusLive). */
@@ -310,7 +310,7 @@ public final class BridgeServer {
     }
 
     /** For /room/check: is this the room, is the code right, and what is there to join. */
-    static JsonObject check(final String room, final String code) {
+    static JsonObject check(final String room, final String code, final String uid) {
         JsonObject o = new JsonObject();
         boolean ok = ROOM.equals(room) && CODE.equals(code);
         o.addProperty("ok", ok);
@@ -328,6 +328,11 @@ public final class BridgeServer {
                 com.google.gson.JsonArray s = new com.google.gson.JsonArray();
                 current.seatGuis.keySet().forEach(s::add);
                 o.add("seats", s);
+                // The host's own phone (signed in to the same account): their
+                // seat, so it does not have to ask whose hand it is.
+                if (uid != null && !uid.isEmpty() && uid.equals(current.hostUid) && current.hostSeat != null) {
+                    o.addProperty("mine", current.hostSeat);
+                }
             }
         }
         return o;
@@ -517,6 +522,10 @@ public final class BridgeServer {
             b = b + " 2";
         }
         final String nameA = a, nameB = b;
+        // Who hosts, and their account when signed in (their phone, entering
+        // by room and code, then goes straight to their hand).
+        hostSeat = nameA;
+        hostUid = host.has("hostUid") ? host.get("hostUid").getAsString() : null;
         BridgeGui ga = new BridgeGui(json -> sendSeat(nameA, json));
         BridgeGui gb = new BridgeGui(json -> sendSeat(nameB, json));
         seatGuis.put(nameA, ga);
@@ -977,52 +986,41 @@ public final class BridgeServer {
                 // "Take that back": the game as it was before our last action
                 // (see Rewind). Run on the game's own pool while our seat waits
                 // for priority, as Forge's dev-mode state setup is.
+                // The moments that can be gone back to, for the picker.
+                case "rewindList": {
+                    forge.game.Game game = BridgeMain.currentGame;
+                    JsonObject o = new JsonObject();
+                    o.addProperty("t", "rewindList");
+                    o.add("items", game == null ? new JsonArray() : Rewind.list(game));
+                    g.sendJson(o);
+                    break;
+                }
+                // "Take that back": to the moment picked ("to"), or the one
+                // just before now. Two players: the other one is asked first.
                 case "rewind": {
                     forge.game.Game game = BridgeMain.currentGame;
                     if (game == null) {
                         break;
                     }
-                    // Two players: it would undo the other player's moves too,
-                    // so they are asked first; nothing happens until they allow it.
-                    String mySeat = seatOfGui(g);
-                    if (!seatGuis.isEmpty() && mySeat != null) {
-                        askRewind(game, mySeat);
+                    int to = in.has("to") ? in.get("to").getAsInt() : Rewind.previous(game);
+                    if (to < 0) {
+                        g.tell(java.util.List.of("Nothing to take back yet."));
                         break;
                     }
-                    game.getAction().invoke(() -> {
-                        try {
-                            if (Rewind.back(game)) {
-                                game.getAction().checkStateEffects(true);
-                                // The restore writes the game, not its view: the
-                                // stack, combat and turn the screen reads have to
-                                // be told, or a taken-back spell stays drawn.
-                                game.updateStackForView();
-                                game.updateCombatForView();
-                                game.updatePhaseForView();
-                                game.updateTurnForView();
-                                game.updatePlayerTurnForView();
-                                g.tell(java.util.List.of("Taken back — the game is as it was before that."));
-                            } else {
-                                g.tell(java.util.List.of("Nothing to take back yet."));
-                            }
-                        } catch (RuntimeException e) {
-                            System.out.println("rewind failed: " + e);
-                            e.printStackTrace(System.out);
-                            g.tell(java.util.List.of("Could not take that back: " + e.getMessage()));
-                        }
-                        if (BridgeMain.currentForwarder != null) {
-                            BridgeMain.currentForwarder.flush();
-                        }
-                        g.sendBoard();
-                        g.reshowPrompts();
-                    });
+                    String mySeat = seatOfGui(g);
+                    if (!seatGuis.isEmpty() && mySeat != null) {
+                        askRewind(game, mySeat, to);
+                        break;
+                    }
+                    goBack(game, to, "Back to " + Rewind.labelOf(to) + ".", java.util.List.of(g));
                     break;
                 }
-                // The other player's answer to a take-back request.
                 case "rewindAnswer": {
                     String seatOf = seatOfGui(g);
                     String from = pendingRewindFrom;
+                    int to = pendingRewindTo;
                     pendingRewindFrom = null;
+                    pendingRewindTo = -1;
                     if (from == null || seatOf == null || seatOf.equals(from)) {
                         break;
                     }
@@ -1036,7 +1034,8 @@ public final class BridgeServer {
                     }
                     forge.game.Game game = BridgeMain.currentGame;
                     if (game != null) {
-                        rewindFor(game, new java.util.ArrayList<>(seatGuis.values()), from + " took back their last action — " + seatOf + " allowed it.");
+                        goBack(game, to, from + " went back to " + Rewind.labelOf(to) + " — " + seatOf + " allowed it.",
+                                new java.util.ArrayList<>(seatGuis.values()));
                     }
                     break;
                 }

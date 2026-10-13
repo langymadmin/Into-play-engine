@@ -158,6 +158,11 @@ public class BridgeGui extends AbstractGuiGame {
     // Outbound
     // ---------------------------------------------------------------------
 
+    /** A message of the server's own (the take-back list) to this seat's screens. */
+    public void sendJson(final JsonObject o) {
+        send(o);
+    }
+
     private void send(final JsonObject o) {
         if (retired) {
             return;

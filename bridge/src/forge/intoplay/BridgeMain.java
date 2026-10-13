@@ -217,7 +217,22 @@ public final class BridgeMain {
                         if (!isOffTable(p.getName())) {
                             Rewind.remember(game);
                         }
-                        return super.chooseSpellAbilityToPlay();
+                        // Going back: the wait for priority is where it starts
+                        // (BridgeServer releases it; playOn does the rest).
+                        if (Rewind.isPending()) {
+                            throw new Rewind.Signal();
+                        }
+                        Rewind.waitingSeat = p.getName();
+                        Rewind.inPriority = true;
+                        try {
+                            java.util.List<forge.game.spellability.SpellAbility> r = super.chooseSpellAbilityToPlay();
+                            if (Rewind.isPending()) {
+                                throw new Rewind.Signal();
+                            }
+                            return r;
+                        } finally {
+                            Rewind.inPriority = false;
+                        }
                     }
 
                     // The off-table seat's blocks are cardboard, declared on the
@@ -761,40 +776,57 @@ public final class BridgeMain {
      * Each further failure goes one step further back.
      */
     static void playOn(final Game game, final Runnable start, final java.util.List<BridgeGui> guis) {
-        RuntimeException crash;
-        try {
-            start.run();
-            return;
-        } catch (RuntimeException e) {
-            crash = e;
-        }
-        for (int i = 0; i < 8; i++) {
-            System.out.println("[engine tripped] " + crash);
-            crash.printStackTrace(System.out);
-            if (game.isGameOver()) {
-                throw crash;
-            }
-            String step = Rewind.recover(game);
-            if (step == null) {
-                throw crash;
-            }
-            if (currentForwarder != null) {
-                currentForwarder.flush();
-            }
-            for (BridgeGui g : guis) {
-                g.tell(java.util.List.of("The rules engine tripped over something, so the game went back to "
-                        + step + " — just before it. Carry on from there."));
-                g.sendBoard();
-            }
+        boolean first = true;
+        int crashes = 0;
+        while (true) {
             try {
-                game.getPhaseHandler().mainGameLoop();
-                game.fireEvent(new forge.game.event.GameEventGameFinished());
+                if (first) {
+                    first = false;
+                    start.run();
+                } else {
+                    game.getPhaseHandler().mainGameLoop();
+                    game.fireEvent(new forge.game.event.GameEventGameFinished());
+                }
                 return;
-            } catch (RuntimeException e) {
-                crash = e;
+            } catch (Rewind.Signal s) {
+                // "Take that back" to a chosen moment: out of the loop,
+                // restored, and the loop starts again from there.
+                String said = Rewind.goToPending(game);
+                // "End Turn" pressed before going back would carry the game
+                // straight past the moment again: the players' own auto-pass
+                // is cleared (the off-table seat keeps passing, as always).
+                for (Player p : game.getPlayers()) {
+                    if (!isOffTable(p.getName()) && p.getController() instanceof PlayerControllerHuman h && h.mayAutoPass()) {
+                        h.autoPassCancel();
+                    }
+                }
+                if (currentForwarder != null) {
+                    currentForwarder.flush();
+                }
+                for (BridgeGui g : guis) {
+                    g.tell(java.util.List.of(said != null ? said : "Could not go back to that moment."));
+                    g.sendBoard();
+                }
+            } catch (RuntimeException crash) {
+                System.out.println("[engine tripped] " + crash);
+                crash.printStackTrace(System.out);
+                if (++crashes > 8 || game.isGameOver()) {
+                    throw crash;
+                }
+                String step = Rewind.recover(game);
+                if (step == null) {
+                    throw crash;
+                }
+                if (currentForwarder != null) {
+                    currentForwarder.flush();
+                }
+                for (BridgeGui g : guis) {
+                    g.tell(java.util.List.of("The rules engine tripped over something, so the game went back to "
+                            + step + " — just before it. Carry on from there."));
+                    g.sendBoard();
+                }
             }
         }
-        throw crash;
     }
 
     static void runVersus(final BridgeGui guiA, final JsonPair a, final BridgeGui guiB, final JsonPair b,

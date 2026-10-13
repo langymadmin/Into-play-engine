@@ -78,7 +78,7 @@ final class AppFiles extends SimpleChannelInboundHandler<FullHttpRequest> {
                 }
             }
             res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.copiedBuffer(
-                    BridgeServer.check(qs.getOrDefault("room", "").trim(), qs.getOrDefault("code", "").trim()).toString(),
+                    BridgeServer.check(qs.getOrDefault("room", "").trim(), qs.getOrDefault("code", "").trim(), qs.getOrDefault("uid", "").trim()).toString(),
                     java.nio.charset.StandardCharsets.UTF_8));
             res.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
             res.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-store");
