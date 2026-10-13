@@ -103,12 +103,15 @@ final class Rewind {
             forge.game.phase.PhaseHandler ph = game.getPhaseHandler();
             String step = ph.getPhase() == null ? "the start" : ph.getPhase().nameForUi;
             String key = signature(game) + "#" + ph.getPhase();
+            Entry top = history.isEmpty() ? null : history.get(history.size() - 1);
+            // The same moment, asked again (priority going round between the
+            // players): nothing new to copy or save. A full copy of the game
+            // at every pass was most of the engine's work in a two-player game.
+            if (top != null && top.key.equals(key)) {
+                return;
+            }
             GameSnapshot snap = new GameSnapshot(game);
             snap.makeCopy();
-            Entry top = history.isEmpty() ? null : history.get(history.size() - 1);
-            if (top != null && top.key.equals(key)) {
-                history.remove(history.size() - 1); // the same moment, asked again
-            }
             // On disk too, for "Resume the last game".
             Saves.snapshot(game);
             java.util.Set<Integer> ids = new java.util.HashSet<>();

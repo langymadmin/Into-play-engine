@@ -1776,6 +1776,28 @@ public class BridgeGui extends AbstractGuiGame {
      * sent ahead of the question, because the client decides for itself whether
      * to show the two together.
      */
+    /**
+     * Looking at the other player's hand (Gitaxian Probe, Thoughtseize's look):
+     * Forge shows the cards in a panel beside its prompt ("Looking at cards in
+     * Bob's hand" — OK / End Turn) and waits for OK. Without this the cards
+     * were nowhere. Sent as a reveal, which the screen keeps open until it is
+     * closed — closing it answers the OK (bridge3 dismissReveal).
+     */
+    @Override
+    public void showRevealedCards(final Iterable<CardView> cards) {
+        java.util.List<CardView> list = new ArrayList<>();
+        cards.forEach(list::add);
+        if (list.isEmpty()) {
+            return;
+        }
+        String owner = list.get(0).getOwner() == null ? "" : list.get(0).getOwner().getName();
+        JsonObject o = msg("reveal");
+        o.addProperty("prefix", owner.isEmpty() ? "Their hand" : owner + "'s hand");
+        o.addProperty("confirm", true);
+        o.add("cards", options(list, CardView::getName));
+        send(o);
+    }
+
     private void revealDelayed(final DelayedReveal dr) {
         if (dr == null || dr.getCards() == null || dr.getCards().isEmpty()) {
             return;
@@ -1922,6 +1944,17 @@ public class BridgeGui extends AbstractGuiGame {
         JsonObject o = msg("event");
         o.addProperty("kind", event.getClass().getSimpleName());
         o.addProperty("text", String.valueOf(event));
+        // A card moving: which, whose, from where to where — the screen shows
+        // the other player's discards and exiles big (see bridge3 zoneNote).
+        if (event instanceof forge.game.event.GameEventCardChangeZone cz && cz.card() != null) {
+            o.addProperty("cardId", cz.card().getId());
+            o.addProperty("name", cz.card().getName());
+            if (cz.card().getOwner() != null) {
+                o.addProperty("owner", cz.card().getOwner().getName());
+            }
+            o.addProperty("from", cz.from() == null ? "" : String.valueOf(cz.from().zoneType()));
+            o.addProperty("to", cz.to() == null ? "" : String.valueOf(cz.to().zoneType()));
+        }
         send(o);
         // Kept for a screen that reconnects: its log and the match log's
         // replay are rebuilt from these (see catchUp).

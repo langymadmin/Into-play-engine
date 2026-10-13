@@ -128,6 +128,20 @@ if (Listening $Port) {
 
 # --- java -------------------------------------------------------------------
 $java = (Get-Command java -ErrorAction SilentlyContinue).Source
+# An ARM PC (Surface Pro 11, Snapdragon): an x64 Java runs there under
+# emulation, and the engine lags badly. An ARM64 Java, when installed, first.
+function IsArm64Exe($path) {
+    try {
+        $b = [IO.File]::ReadAllBytes($path)
+        $pe = [BitConverter]::ToInt32($b, 60)
+        return [BitConverter]::ToUInt16($b, $pe + 4) -eq 0xAA64
+    } catch { return $false }
+}
+if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
+    $arm = Get-ChildItem "C:\Program Files\Eclipse Adoptium", "C:\Program Files\Microsoft", "C:\Program Files\Java" -Recurse -Filter java.exe -ErrorAction SilentlyContinue |
+        Where-Object { $_.DirectoryName -like "*\bin" -and (IsArm64Exe $_.FullName) } | Select-Object -First 1
+    if ($arm) { $java = $arm.FullName }
+}
 if (-not $java) {
     # Temurin installs here without always touching PATH.
     $java = (Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Recurse -Filter java.exe -ErrorAction SilentlyContinue |
